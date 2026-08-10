@@ -76,6 +76,12 @@ export const openapi = {
     "/api/drive/items/{id}/download": {
       get: { parameters: [{ $ref: "#/components/parameters/ItemId" }], responses: { "200": { description: "File bytes" }, "404": { description: "Not found" } } },
     },
+    "/api/drive/items/{id}/preview": {
+      get: { parameters: [{ $ref: "#/components/parameters/ItemId" }], responses: { "200": { description: "Inline preview file bytes" }, "404": { description: "Not found" } } },
+    },
+    "/api/drive/items/{id}/preview-text": {
+      get: { parameters: [{ $ref: "#/components/parameters/ItemId" }], responses: { "200": { description: "UTF-8 text preview" }, "404": { description: "Not found" }, "422": { description: "File is not valid preview text" } } },
+    },
     "/api/drive/items/{id}/trash": {
       post: { parameters: [{ $ref: "#/components/parameters/ItemId" }], responses: { "200": { description: "Trashed subtree" } } },
     },

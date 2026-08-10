@@ -19,6 +19,10 @@ describe("Drive UI render contract", () => {
       "Filters",
       "Grid view",
       "Select all items",
+      "File preview",
+      "Close preview",
+      "Preview unavailable",
+      "onOpenFile={openPreview}",
     ]) {
       expect(source).toContain(label);
     }
@@ -47,5 +51,16 @@ describe("Drive UI render contract", () => {
     expect(source).toContain("document.addEventListener('pointerdown', handlePointerDown)");
     expect(source).toContain("!menu.contains(event.target)");
     expect(source).toContain("menu.open = false");
+  });
+
+  it("provides authenticated inline and text preview endpoints", async () => {
+    const previewRoute = await readFile(path.resolve("src/app/api/drive/items/[id]/preview/route.ts"), "utf8");
+    const textRoute = await readFile(path.resolve("src/app/api/drive/items/[id]/preview-text/route.ts"), "utf8");
+
+    expect(previewRoute).toContain('"Content-Disposition": "inline"');
+    expect(previewRoute).toContain('"X-Content-Type-Options": "nosniff"');
+    expect(previewRoute).toContain("requireAuth(request)");
+    expect(textRoute).toContain('"Content-Type": "text/plain; charset=utf-8"');
+    expect(textRoute).toContain("readText");
   });
 });

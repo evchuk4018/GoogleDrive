@@ -193,6 +193,12 @@ export function permanentlyDeleteItem(itemId: string) {
   });
 }
 
+export function readPreviewText(itemId: string) {
+  return request<string>(`/api/drive/items/${encodeURIComponent(itemId)}/preview-text`, {
+    timeoutMs: DRIVE_READ_TIMEOUT_MS,
+  });
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
