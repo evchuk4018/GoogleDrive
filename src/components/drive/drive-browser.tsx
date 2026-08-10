@@ -490,7 +490,7 @@ export function DriveBrowser() {
   return (
     <div className={`drive-app ${sidebarOpen ? 'sidebar-open' : ''}`}>
       <header className="drive-topbar">
-        <button aria-label="Open navigation" className="icon-button topbar-menu" onClick={() => setSidebarOpen(true)} type="button"><DriveIcon name="menu" /></button>
+        <button aria-controls="drive-navigation" aria-expanded={sidebarOpen} aria-label={sidebarOpen ? 'Close navigation' : 'Open navigation'} className={`icon-button topbar-menu ${sidebarOpen ? 'topbar-menu-active' : ''}`} onClick={() => setSidebarOpen((current) => !current)} type="button"><DriveIcon name={sidebarOpen ? 'close' : 'menu'} size={22} /></button>
         <a className="brand topbar-brand" href={drivePublicPath('/')}><span aria-hidden="true" className="brand-mark">D</span><span>Drive</span></a>
         <form className="search-shell" onSubmit={handleSearchSubmit} role="search">
           <DriveIcon name="search" size={21} />
@@ -507,7 +507,7 @@ export function DriveBrowser() {
 
       <div aria-hidden={!sidebarOpen} className="sidebar-scrim" onClick={() => setSidebarOpen(false)} />
       <div className="drive-layout">
-        <aside aria-label="Drive navigation" className="drive-sidebar">
+        <aside aria-label="Drive navigation" className="drive-sidebar" id="drive-navigation">
           <button className="new-button" disabled={busyAction !== null} onClick={openFolderDialog} type="button"><DriveIcon name="plus" size={21} />New</button>
           <nav className="sidebar-nav">
             <button className={`sidebar-link ${view === 'drive' ? 'sidebar-link-active' : ''}`} onClick={() => selectView('drive')} type="button"><DriveIcon name="home" />My Drive</button>

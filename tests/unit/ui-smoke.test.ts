@@ -29,4 +29,14 @@ describe("Drive UI render contract", () => {
     expect(source).toContain("Drive is unavailable");
     expect(source).toContain("Try again");
   });
+
+  it("keeps the mobile navigation control connected to the sidebar", async () => {
+    const source = await readFile(path.resolve("src/components/drive/drive-browser.tsx"), "utf8");
+    const iconSource = await readFile(path.resolve("src/components/drive/drive-icons.tsx"), "utf8");
+
+    expect(source).toContain("aria-controls=\"drive-navigation\"");
+    expect(source).toContain("aria-expanded={sidebarOpen}");
+    expect(source).toContain("id=\"drive-navigation\"");
+    expect(iconSource).toContain('stroke="currentColor"');
+  });
 });

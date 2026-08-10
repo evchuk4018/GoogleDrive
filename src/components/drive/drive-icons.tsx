@@ -53,7 +53,7 @@ const paths: Record<DriveIconName, ReactNode> = {
 
 export function DriveIcon({ name, size = 20, ...props }: { name: DriveIconName; size?: number } & Omit<SVGProps<SVGSVGElement>, 'name'>) {
   return (
-    <svg aria-hidden="true" fill="none" height={size} viewBox="0 0 24 24" width={size} {...props}>
+    <svg aria-hidden="true" fill="none" height={size} stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24" width={size} {...props}>
       {paths[name]}
     </svg>
   );

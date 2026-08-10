@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "@/styles/global.css";
 
 import { DrivePwaRegistration } from "@/components/drive/drive-pwa-registration";
@@ -21,6 +21,15 @@ export const metadata: Metadata = {
       type: "image/png",
     },
   },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
+  themeColor: "#1a1b1f",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

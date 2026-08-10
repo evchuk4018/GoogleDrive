@@ -1,4 +1,5 @@
 :root {
+  --topbar-height: 76px;
   --ink: #e8eaed;
   --muted: #aeb4bd;
   --soft-muted: #7d858f;
@@ -22,7 +23,12 @@
 
 * { box-sizing: border-box; }
 
-html { background: var(--canvas); }
+html {
+  background: var(--canvas);
+  block-size: 100%;
+  inline-size: 100%;
+  overflow: hidden;
+}
 
 body {
   background: var(--canvas);
@@ -31,6 +37,10 @@ body {
   font-size: 15px;
   line-height: 1.5;
   margin: 0;
+  block-size: 100%;
+  min-block-size: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 button, input, select { color: inherit; font: inherit; }
@@ -40,7 +50,15 @@ a { color: var(--brand); }
 a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid rgb(138 180 248 / 35%); outline-offset: 2px; }
 .sr-only { block-size: 1px; clip: rect(0 0 0 0); clip-path: inset(50%); inline-size: 1px; overflow: hidden; position: absolute; white-space: nowrap; }
 
-.drive-app { min-block-size: 100vh; }
+.drive-app {
+  block-size: 100vh;
+  block-size: 100dvh;
+  inline-size: 100%;
+  min-block-size: 100vh;
+  min-block-size: 100dvh;
+  max-inline-size: 100%;
+  overflow: hidden;
+}
 
 .drive-topbar {
   align-items: center;
@@ -48,7 +66,8 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   border-block-end: 1px solid var(--line);
   display: flex;
   gap: 18px;
-  min-block-size: 76px;
+  min-block-size: var(--topbar-height);
+  flex-shrink: 0;
   padding: 12px clamp(18px, 3vw, 36px);
   position: sticky;
   top: 0;
@@ -82,8 +101,15 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .header-action:hover, .icon-button:hover { background: rgb(255 255 255 / 8%); color: var(--ink); }
 .avatar { align-items: center; background: linear-gradient(135deg, #5c8df6, #c58af9); border: 2px solid #202124; border-radius: 50%; color: white; display: inline-flex; font-size: .76rem; font-weight: 800; block-size: 36px; inline-size: 36px; justify-content: center; }
 
-.drive-layout { display: flex; min-block-size: calc(100vh - 76px); }
-.drive-sidebar { background: var(--surface-soft); border-inline-end: 1px solid var(--line); display: flex; flex: 0 0 252px; flex-direction: column; padding: 24px 14px 20px; }
+.drive-layout {
+  block-size: calc(100vh - var(--topbar-height));
+  block-size: calc(100dvh - var(--topbar-height));
+  display: flex;
+  inline-size: 100%;
+  min-block-size: 0;
+  overflow: hidden;
+}
+.drive-sidebar { background: var(--surface-soft); border-inline-end: 1px solid var(--line); display: flex; flex: 0 0 252px; flex-direction: column; min-block-size: 0; overflow-y: auto; padding: 24px 14px 20px; }
 .new-button { align-items: center; align-self: flex-start; background: #303134; border: 1px solid #4b4e55; border-radius: 17px; box-shadow: 0 4px 12px rgb(0 0 0 / 18%); color: var(--ink); display: inline-flex; font-weight: 700; gap: 11px; margin: 0 8px 25px; padding: 12px 18px; transition: background .18s ease, box-shadow .18s ease, transform .18s ease; }
 .new-button:hover { background: #3c4043; box-shadow: 0 7px 18px rgb(0 0 0 / 25%); transform: translateY(-1px); }
 .sidebar-nav { display: flex; flex-direction: column; gap: 3px; }
@@ -104,7 +130,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .sidebar-footer-link:hover { color: var(--ink); }
 .sidebar-scrim { display: none; }
 
-.drive-content { flex: 1; min-inline-size: 0; padding: clamp(24px, 4vw, 48px) clamp(18px, 4vw, 56px) 70px; }
+.drive-content { flex: 1; min-inline-size: 0; max-inline-size: 100%; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: clamp(24px, 4vw, 48px) clamp(18px, 4vw, 56px) 70px; }
 .content-inner { margin: 0 auto; max-inline-size: 1320px; }
 .page-header { align-items: flex-end; display: flex; gap: 20px; justify-content: space-between; margin-block-end: 25px; }
 .eyebrow { color: var(--brand); font-size: .7rem; font-weight: 800; letter-spacing: .15em; margin: 0 0 8px; text-transform: uppercase; }
@@ -239,8 +265,20 @@ h2 { font-size: 1.35rem; letter-spacing: -.03em; line-height: 1.15; margin-block
 }
 
 @media (max-width: 700px) {
-  .drive-topbar { gap: 8px; min-block-size: 68px; padding: 10px 14px; }
-  .topbar-menu { display: inline-flex; }
+  :root { --topbar-height: 68px; }
+  .drive-topbar { gap: 8px; padding: 10px 14px; }
+  .topbar-menu {
+    background: var(--brand);
+    border: 1px solid rgb(168 199 250 / 80%);
+    box-shadow: 0 4px 14px rgb(0 0 0 / 28%);
+    color: #17243a;
+    display: inline-flex;
+    flex-shrink: 0;
+    min-block-size: 44px;
+    min-inline-size: 44px;
+  }
+  .topbar-menu:hover, .topbar-menu-active { background: var(--brand-dark); color: #17243a; }
+  .topbar-menu svg { stroke-width: 2.25; }
   .topbar-brand { display: none; }
   .search-shell { flex: 1; inline-size: auto; min-block-size: 44px; }
   .header-actions .header-action { display: none; }

@@ -21,8 +21,8 @@ export function createDriveManifest(basePath = DRIVE_PUBLIC_BASE_PATH): Metadata
     start_url: rootPath,
     scope: driveScope(basePath),
     display: 'standalone',
-    background_color: '#f7f5ef',
-    theme_color: '#1f2933',
+    background_color: '#111315',
+    theme_color: '#1a1b1f',
     icons: [
       {
         src: drivePublicPath('/drive-icon-192.svg', basePath),
