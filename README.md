@@ -12,6 +12,16 @@ The application container applies pending migrations before starting. Database a
 
 The production image sets `NEXT_PUBLIC_DRIVE_BASE_PATH=/drive` so browser assets, navigation, and API calls stay under the Tailscale Serve mount. Leave it empty for direct local development at `/`.
 
+## Share files from a phone
+
+Drive is installable as a PWA and registers as a multi-file system share target. While connected to the private Tailscale network:
+
+1. Open the Drive URL in Chrome on Android, sign in, and use the browser menu to install or add Drive to the home screen.
+2. From Photos or Files, select one or more items, tap Share, and choose Drive.
+3. Drive uploads the shared files to the My Drive root and reports any partial failures.
+
+Sharing requires an active network connection and an existing Drive session. The share target is primarily supported by Android Chromium browsers; it does not provide an offline upload queue.
+
 ## API
 
 REST and MCP requests use `Authorization: Bearer $DRIVE_API_TOKEN`. The browser login accepts the same token and exchanges it for a short-lived HttpOnly session cookie.

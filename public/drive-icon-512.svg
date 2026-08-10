@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Drive</title>
+  <rect width="512" height="512" rx="112" fill="#1f2933"/>
+  <path fill="#f7f5ef" d="M155 126h76l126 218h-76z"/>
+  <path fill="#d7a84b" d="m231 126 38 66-87 152h-76z"/>
+  <path fill="#7ca8a2" d="M182 344h175l-38 66H144z"/>
+</svg>

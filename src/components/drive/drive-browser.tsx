@@ -106,6 +106,7 @@ export function DriveBrowser() {
   const [dialogValue, setDialogValue] = useState('');
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [shareNotice, setShareNotice] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const isTrash = view === 'trash';
@@ -153,6 +154,31 @@ export function DriveBrowser() {
   }, [loadItems]);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const shareState = params.get('share');
+    const sharedState = params.get('shared');
+    const uploaded = Number(params.get('uploaded')) || 0;
+    const failed = Number(params.get('failed')) || 0;
+
+    if (shareState === 'signin') {
+      setShareNotice('Sign in before sharing files with Drive.');
+    } else if (sharedState === 'success') {
+      setStatusMessage(`${uploaded} ${uploaded === 1 ? 'file' : 'files'} uploaded from Share.`);
+    } else if (sharedState === 'partial') {
+      setStatusMessage(`${uploaded} ${uploaded === 1 ? 'file' : 'files'} uploaded from Share.`);
+      setShareNotice(`${failed} ${failed === 1 ? 'shared file was' : 'shared files were'} not uploaded.`);
+    } else if (sharedState === 'empty') {
+      setShareNotice('No files were received from the share.');
+    } else if (sharedState === 'error') {
+      setShareNotice('Drive could not upload the shared files. Try again.');
+    }
+
+    if (shareState || sharedState) {
+      window.history.replaceState(null, document.title, `${window.location.pathname}${window.location.hash}`);
+    }
+  }, []);
+
+  useEffect(() => {
     if (!dialog) return undefined;
 
     function handleEscape(event: KeyboardEvent) {
@@ -166,6 +192,7 @@ export function DriveBrowser() {
   function handleAuthSuccess() {
     setAuthState('signed-in');
     setError(null);
+    setShareNotice(null);
     setStatusMessage('Signed in successfully.');
     void loadItems();
   }
@@ -284,18 +311,38 @@ export function DriveBrowser() {
   }
 
   async function handleUploadChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files ?? []);
     event.target.value = '';
-    if (!file) return;
+    if (files.length === 0) return;
     setBusyAction('upload');
     setError(null);
+    setShareNotice(null);
     setStatusMessage(null);
+    let uploaded = 0;
+    let failed = 0;
+    let firstError: unknown;
     try {
-      await uploadFile(file, parentId);
-      setStatusMessage(`${file.name} uploaded.`);
-      await loadItems();
-    } catch (uploadError) {
-      handleMutationError(uploadError);
+      for (const file of files) {
+        try {
+          await uploadFile(file, parentId);
+          uploaded += 1;
+        } catch (uploadError) {
+          failed += 1;
+          firstError ??= uploadError;
+          if (isAuthError(uploadError)) break;
+        }
+      }
+
+      if (firstError && isAuthError(firstError)) {
+        handleMutationError(firstError);
+      } else if (failed > 0) {
+        if (uploaded > 0) setStatusMessage(`${uploaded} ${uploaded === 1 ? 'file' : 'files'} uploaded.`);
+        setError(`${failed} ${failed === 1 ? 'file could not' : 'files could'} be uploaded.`);
+      } else {
+        setStatusMessage(`${uploaded} ${uploaded === 1 ? 'file' : 'files'} uploaded.`);
+      }
+
+      if (uploaded > 0) await loadItems();
     } finally {
       setBusyAction(null);
     }
@@ -414,7 +461,7 @@ export function DriveBrowser() {
           <p className="eyebrow">Private storage</p>
           <h1>Sign in to Drive</h1>
           <p className="login-intro">Enter the API token for this private Drive service to browse your files.</p>
-          {error ? <p aria-live="polite" className="form-error" role="alert">{error}</p> : null}
+          {(error ?? shareNotice) ? <p aria-live="polite" className="form-error" role="alert">{error ?? shareNotice}</p> : null}
           <LoginForm onSuccess={handleAuthSuccess} />
           <p className="login-footer"><a href={drivePublicPath('/login')}>Open the dedicated sign-in page</a></p>
         </div>
@@ -526,10 +573,10 @@ export function DriveBrowser() {
                 <div className="action-row-left"><p className="selection-count">{selectedCount} selected</p>
                   {!isTrash ? <><button className="button button-secondary" disabled={busyAction !== null} onClick={() => void runBulkMutation('star')} type="button"><DriveIcon name="star" size={16} />Star</button><button className="button button-secondary" disabled={busyAction !== null} onClick={() => void runBulkMutation('unstar')} type="button">Unstar</button><button className="button button-secondary" disabled={busyAction !== null} onClick={openBulkMoveDialog} type="button"><DriveIcon name="folder" size={16} />Move</button><button className="button button-danger" disabled={busyAction !== null} onClick={() => openBulkConfirmDialog('trash')} type="button"><DriveIcon name="trash" size={16} />Trash</button></> : <><button className="button button-secondary" disabled={busyAction !== null} onClick={() => void runBulkMutation('restore')} type="button">Restore</button><button className="button button-danger" disabled={busyAction !== null} onClick={() => openBulkConfirmDialog('permanent')} type="button">Delete forever</button></>}
                 </div><button className="button button-quiet" onClick={() => setSelectedIds(new Set())} type="button">Clear selection</button>
-              </div> : <div className="action-row"><div className="action-row-left">{!isTrash ? <><input className="sr-only" id="drive-upload" onChange={handleUploadChange} ref={fileInputRef} type="file" /><button className="button button-primary" disabled={busyAction !== null} onClick={() => fileInputRef.current?.click()} type="button"><DriveIcon name="upload" size={16} />{busyAction === 'upload' ? 'Uploading…' : 'Upload file'}</button><button className="button button-secondary" disabled={busyAction !== null} onClick={openFolderDialog} type="button"><DriveIcon name="plus" size={16} />New folder</button></> : <p className="toolbar-hint">Items in Trash can be restored or permanently deleted.</p>}</div>{isSearching ? <p className="toolbar-hint">{activeSearch ? <>Results for <strong>“{activeSearch}”</strong></> : view === 'recent' ? 'Recently modified items' : view === 'starred' ? 'Your starred items' : 'Filtered items'}</p> : null}</div>}
+              </div> : <div className="action-row"><div className="action-row-left">{!isTrash ? <><input className="sr-only" id="drive-upload" multiple onChange={handleUploadChange} ref={fileInputRef} type="file" /><button className="button button-primary" disabled={busyAction !== null} onClick={() => fileInputRef.current?.click()} type="button"><DriveIcon name="upload" size={16} />{busyAction === 'upload' ? 'Uploading…' : 'Upload file'}</button><button className="button button-secondary" disabled={busyAction !== null} onClick={openFolderDialog} type="button"><DriveIcon name="plus" size={16} />New folder</button></> : <p className="toolbar-hint">Items in Trash can be restored or permanently deleted.</p>}</div>{isSearching ? <p className="toolbar-hint">{activeSearch ? <>Results for <strong>“{activeSearch}”</strong></> : view === 'recent' ? 'Recently modified items' : view === 'starred' ? 'Your starred items' : 'Filtered items'}</p> : null}</div>}
 
               {statusMessage ? <p aria-live="polite" className="status-message" role="status">{statusMessage}</p> : null}
-              {error ? <p aria-live="assertive" className="form-error page-error" role="alert">{error}</p> : null}
+              {(error ?? shareNotice) ? <p aria-live="assertive" className="form-error page-error" role="alert">{error ?? shareNotice}</p> : null}
 
               {viewMode === 'list' ? <div aria-busy={loading} className="table-wrap"><table className="item-table"><caption className="sr-only">{viewTitle(view)} files and folders</caption><thead><tr><th scope="col"><label className="sr-only" htmlFor="select-all">Select all items</label><input aria-label="Select all items" checked={allSelected} className="item-check" id="select-all" onChange={toggleSelectAll} type="checkbox" /></th><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Updated</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>{loading ? <tr><td className="table-message" colSpan={5}>Loading items…</td></tr> : items.length === 0 ? <tr><td className="table-message" colSpan={5}><EmptyState isTrash={isTrash} isSearching={isSearching} /></td></tr> : items.map((item) => <DriveItemRow disabled={busyAction !== null} isSelected={selectedIds.has(item.id)} isTrash={isTrash} item={item} key={item.id} onMove={openMoveDialog} onOpenFolder={openFolder} onPermanentDelete={(candidate) => openConfirmDialog(candidate, 'permanent')} onRename={openRenameDialog} onRestore={handleRestore} onSelect={toggleSelected} onStar={toggleStar} onTrash={(candidate) => openConfirmDialog(candidate, 'trash')} />)}</tbody></table></div> : <div aria-busy={loading} className="grid-wrap">{loading ? <div className="table-message">Loading items…</div> : items.length === 0 ? <div className="table-message"><EmptyState isTrash={isTrash} isSearching={isSearching} /></div> : items.map((item) => <DriveItemCard disabled={busyAction !== null} isSelected={selectedIds.has(item.id)} isTrash={isTrash} item={item} key={item.id} onMove={openMoveDialog} onOpenFolder={openFolder} onPermanentDelete={(candidate) => openConfirmDialog(candidate, 'permanent')} onRename={openRenameDialog} onRestore={handleRestore} onSelect={toggleSelected} onStar={toggleStar} onTrash={(candidate) => openConfirmDialog(candidate, 'trash')} />)}</div>}
             </section>
