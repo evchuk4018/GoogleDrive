@@ -7,4 +7,9 @@ if [[ "${DRIVE_STORAGE_ROOT:-}" != /srv/storage/googledrive/files ]]; then
 fi
 
 node scripts/migrate.mjs
+
+if (($# > 0)); then
+  exec "$@"
+fi
+
 exec node server.js
