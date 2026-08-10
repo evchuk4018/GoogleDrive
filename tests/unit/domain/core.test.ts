@@ -123,6 +123,41 @@ describe("local filesystem storage", () => {
 });
 
 describe("DriveService hierarchy and conditional mutations", () => {
+  it("stars items and supports filtered, sorted, cursor-paginated search", async () => {
+    const { service } = await serviceFixture();
+    const folder = await service.createFolder("Projects");
+    const zebra = await service.upload({ name: "Zebra report.txt", parentId: folder.id, body: bytes("zebra"), maxBytes: 1024 * 1024 });
+    const alpha = await service.upload({ name: "Alpha report.txt", parentId: folder.id, body: bytes("alpha"), maxBytes: 1024 * 1024 });
+
+    const starredZebra = await service.update(zebra.id, { starred: true }, zebra.etag);
+    await service.update(alpha.id, { starred: true }, alpha.etag);
+    expect(starredZebra.starred).toBe(true);
+
+    const firstPage = await service.search("report", {
+      starred: true,
+      kind: "file",
+      parentId: folder.id,
+      modifiedAfter: new Date(Date.now() - 5_000),
+      modifiedBefore: new Date(Date.now() + 5_000),
+      sort: "name",
+      direction: "desc",
+      limit: 1,
+    });
+    expect(firstPage.items.map((item) => item.name)).toEqual(["Zebra report.txt"]);
+    expect(firstPage.nextCursor).not.toBeNull();
+
+    const secondPage = await service.search("report", {
+      starred: true,
+      kind: "file",
+      parentId: folder.id,
+      sort: "name",
+      direction: "desc",
+      limit: 1,
+      cursor: firstPage.nextCursor ?? undefined,
+    });
+    expect(secondPage.items.map((item) => item.name)).toEqual(["Alpha report.txt"]);
+  });
+
   it("protects duplicate sibling names case-insensitively", async () => {
     const { service } = await serviceFixture();
     await service.createFolder("Documents");

@@ -5,6 +5,8 @@ import {
   DriveNetworkError,
   DriveRequestTimeoutError,
   listItems,
+  searchItems,
+  updateItem,
 } from "@/components/drive/drive-api";
 
 describe("Drive API request timeouts", () => {
@@ -54,6 +56,47 @@ describe("Drive API request timeouts", () => {
         name: DriveApiError.name,
         message: "The Drive endpoint was not found. Check the configured Drive URL.",
         status: 404,
+      }),
+    );
+  });
+
+  it("serializes search filters while retaining the simple query helper", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })));
+    const modifiedAfter = new Date("2026-08-01T00:00:00.000Z");
+
+    await searchItems("report", {
+      starred: true,
+      kind: "file",
+      parentId: null,
+      modifiedAfter,
+      sort: "updatedAt",
+      direction: "desc",
+      cursor: "next-page",
+      limit: 25,
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/drive/search?q=report&cursor=next-page&limit=25&starred=true&kind=file&parentId=root&modifiedAfter=2026-08-01T00%3A00%3A00.000Z&sort=updatedAt&direction=desc",
+      expect.objectContaining({ credentials: "include", signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("exposes one update helper for metadata and star changes", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })));
+
+    await updateItem("item-1", { starred: true });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/drive/items/item-1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ starred: true }),
       }),
     );
   });

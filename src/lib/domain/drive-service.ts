@@ -2,8 +2,8 @@ import { TextDecoder } from "node:util";
 
 import { getDriveConfig, ROOT_FOLDER_ID } from "@/lib/config/app-config";
 import { ConflictError, InvalidParentError, NotFoundError, ValidationError } from "@/lib/domain/errors";
-import { newUuid, makeEntityTag, normalizeContentType, normalizeItemName, assertUuid } from "@/lib/domain/validation";
-import type { DriveItem, FileItem, FolderItem, Page, UUID } from "@/lib/domain/types";
+import { newUuid, makeEntityTag, normalizeContentType, normalizeItemName, assertSearchQuery, assertUuid } from "@/lib/domain/validation";
+import type { DriveItem, FileItem, FolderItem, Page, SearchItemsOptions, UUID } from "@/lib/domain/types";
 import { getDb } from "@/lib/persistence/db";
 import { createPostgresDriveRepository } from "@/lib/persistence/drive-repository";
 import type { DriveRepository } from "@/lib/domain/repository";
@@ -11,7 +11,7 @@ import { LocalFilesystemStorage } from "@/lib/storage/local-filesystem";
 
 function rootAsNull(id: string | null | undefined): UUID | null {
   if (id === null || id === undefined || id === "") return null;
-  if (id.toLowerCase() === ROOT_FOLDER_ID) return null;
+  if (id.toLowerCase() === ROOT_FOLDER_ID || id.toLowerCase() === "root") return null;
   return assertUuid(id, "parentId");
 }
 
@@ -29,6 +29,26 @@ export type UploadInput = {
   ifMatch?: string;
   maxBytes?: number;
 };
+
+export type DriveSearchOptions = SearchItemsOptions & {
+  limit?: number;
+  cursor?: string;
+  includeTrash?: boolean;
+};
+
+export type DriveItemChanges = {
+  name?: string;
+  parentId?: string | null;
+  starred?: boolean;
+};
+
+function normalizedSearchDate(value: Date | undefined, field: string): Date | undefined {
+  if (value === undefined) return undefined;
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+    throw new ValidationError(`${field} must be a valid date`);
+  }
+  return new Date(value.getTime());
+}
 
 export class DriveService {
   private readonly repository: DriveRepository;
@@ -56,10 +76,31 @@ export class DriveService {
     return this.repository.listChildren({ parentId: normalizedParent, limit: options.limit ?? 50, cursor: options.cursor, includeTrashed: options.includeTrash ?? false });
   }
 
-  async search(query: string, options: { limit?: number; cursor?: string; includeTrash?: boolean } = {}): Promise<Page<DriveItem>> {
-    const value = query.trim();
-    if (!value) throw new ValidationError("Search query cannot be empty");
-    return this.repository.search({ query: value, limit: options.limit ?? 50, cursor: options.cursor, includeTrashed: options.includeTrash ?? false });
+  async search(query: string, options: DriveSearchOptions = {}): Promise<Page<DriveItem>> {
+    const value = assertSearchQuery(query);
+    const modifiedAfter = normalizedSearchDate(options.modifiedAfter, "modifiedAfter");
+    const modifiedBefore = normalizedSearchDate(options.modifiedBefore, "modifiedBefore");
+    if (modifiedAfter && modifiedBefore && modifiedAfter > modifiedBefore) {
+      throw new ValidationError("modifiedAfter must be before modifiedBefore");
+    }
+    const hasCriteria = value.length > 0 || options.includeTrash !== undefined || options.starred !== undefined ||
+      options.kind !== undefined || options.parentId !== undefined || modifiedAfter !== undefined ||
+      modifiedBefore !== undefined || options.sort !== undefined || options.direction !== undefined;
+    if (!hasCriteria) throw new ValidationError("Search query cannot be empty");
+    const parentId = options.parentId === undefined ? undefined : rootAsNull(options.parentId);
+    return this.repository.search({
+      query: value,
+      limit: options.limit ?? 50,
+      cursor: options.cursor,
+      includeTrashed: options.includeTrash ?? false,
+      starred: options.starred,
+      kind: options.kind,
+      parentId,
+      modifiedAfter,
+      modifiedBefore,
+      sort: options.sort,
+      direction: options.direction,
+    });
   }
 
   async metadata(id: string): Promise<DriveItem> {
@@ -115,13 +156,14 @@ export class DriveService {
     catch { throw new ValidationError("File is not valid UTF-8 text"); }
   }
 
-  async update(id: string, changes: { name?: string; parentId?: string | null }, ifMatch?: string): Promise<DriveItem> {
+  async update(id: string, changes: DriveItemChanges, ifMatch?: string): Promise<DriveItem> {
     const normalizedId = assertUuid(id);
-    const current = await this.metadata(normalizedId);
+    let current = await this.metadata(normalizedId);
     if (normalizedId === ROOT_FOLDER_ID) throw new ConflictError(normalizedId, ifMatch, current.etag);
+    let expectedEtag = ifMatch;
     if (changes.name !== undefined) {
-      const parentId = current.parentId;
-      return this.repository.renameItem(normalizedId, normalizeItemName(changes.name), ifMatch, makeEntityTag());
+      current = await this.repository.renameItem(normalizedId, normalizeItemName(changes.name), expectedEtag, makeEntityTag());
+      expectedEtag = current.etag;
     }
     if (changes.parentId !== undefined) {
       const parentId = rootAsNull(changes.parentId);
@@ -129,7 +171,14 @@ export class DriveService {
       if (parentId === normalizedId || (parentId !== null && await this.repository.isDescendant(normalizedId, parentId))) {
         throw new ValidationError("An item cannot be moved inside itself");
       }
-      return this.repository.moveItem(normalizedId, parentId, ifMatch, makeEntityTag());
+      current = await this.repository.moveItem(normalizedId, parentId, expectedEtag, makeEntityTag());
+      expectedEtag = current.etag;
+    }
+    if (changes.starred !== undefined) {
+      if (typeof changes.starred !== "boolean") throw new ValidationError("starred must be a boolean");
+      if (changes.starred !== current.starred) {
+        current = await this.repository.setStarred(normalizedId, changes.starred, expectedEtag, makeEntityTag());
+      }
     }
     return current;
   }

@@ -12,6 +12,7 @@ import type {
   ListChildrenRequest,
   Page,
   ReplaceFileRecord,
+  SearchSort,
   SearchItemsRequest,
   UUID,
 } from "../../../src/lib/domain/types";
@@ -33,6 +34,22 @@ function sorted(items: DriveItem[]): DriveItem[] {
   });
 }
 
+function searchCursorKey(item: DriveItem, sort: SearchSort): string {
+  switch (sort) {
+    case "updatedAt": return item.updatedAt.toISOString();
+    case "size": return String(item.kind === "file" ? item.sizeBytes : -1);
+    case "kind": return item.kind;
+    case "name":
+    default: return itemNameKey(item.name);
+  }
+}
+
+function compareSearchValues(left: string, right: string, sort: SearchSort): number {
+  if (sort === "updatedAt") return Number(new Date(left)) - Number(new Date(right));
+  if (sort === "size") return Number(left) - Number(right);
+  return left.localeCompare(right);
+}
+
 export class MemoryDriveRepository implements DriveRepository {
   readonly items = new Map<UUID, DriveItem>();
 
@@ -48,6 +65,7 @@ export class MemoryDriveRepository implements DriveRepository {
       updatedAt: now,
       etag: makeEntityTag(),
       revision: 1,
+      starred: false,
     };
     this.items.set(id, folder);
     return cloneItem(folder) as FolderItem;
@@ -95,22 +113,35 @@ export class MemoryDriveRepository implements DriveRepository {
   async search(request: SearchItemsRequest): Promise<Page<DriveItem>> {
     const query = request.query.toLocaleLowerCase("en-US");
     const cursor = decodePageCursor(request.cursor);
-    let candidates = sorted(
-      [...this.items.values()].filter(
-        (item) => itemNameKey(item.name).includes(query) && (request.includeTrashed === true || item.trashedAt === null),
-      ),
+    const sort = request.sort ?? "name";
+    const direction = request.direction ?? "asc";
+    let candidates = [...this.items.values()].filter((item) =>
+      (!query || itemNameKey(item.name).includes(query)) &&
+      (request.includeTrashed === true || item.trashedAt === null) &&
+      (request.starred === undefined || item.starred === request.starred) &&
+      (request.kind === undefined || item.kind === request.kind) &&
+      (request.parentId === undefined || item.parentId === request.parentId) &&
+      (request.modifiedAfter === undefined || item.updatedAt >= request.modifiedAfter) &&
+      (request.modifiedBefore === undefined || item.updatedAt <= request.modifiedBefore),
     );
+    candidates.sort((left, right) => {
+      const value = compareSearchValues(searchCursorKey(left, sort), searchCursorKey(right, sort), sort);
+      const directed = direction === "desc" ? -value : value;
+      return directed || left.id.localeCompare(right.id) * (direction === "desc" ? -1 : 1);
+    });
     if (cursor) {
-      candidates = candidates.filter(
-        (item) => itemNameKey(item.name) > cursor.sortKey || (itemNameKey(item.name) === cursor.sortKey && item.id > cursor.id),
-      );
+      candidates = candidates.filter((item) => {
+        const value = compareSearchValues(searchCursorKey(item, sort), cursor.sortKey, sort);
+        const directed = direction === "desc" ? -value : value;
+        return directed > 0 || (directed === 0 && item.id.localeCompare(cursor.id) * (direction === "desc" ? -1 : 1) > 0);
+      });
     }
     const page = candidates.slice(0, (request.limit ?? 50) + 1);
     const limit = request.limit ?? 50;
     const items = page.slice(0, limit).map(cloneItem);
     return {
       items,
-      nextCursor: page.length > limit && items.length > 0 ? encodePageCursor({ sortKey: itemNameKey(items.at(-1)!.name), id: items.at(-1)!.id }) : null,
+      nextCursor: page.length > limit && items.length > 0 ? encodePageCursor({ sortKey: searchCursorKey(items.at(-1)!, sort), id: items.at(-1)!.id }) : null,
     };
   }
 
@@ -137,6 +168,7 @@ export class MemoryDriveRepository implements DriveRepository {
       updatedAt: now,
       etag: record.etag,
       revision: 1,
+      starred: false,
     };
     this.items.set(item.id, item);
     return cloneItem(item) as FolderItem;
@@ -155,6 +187,7 @@ export class MemoryDriveRepository implements DriveRepository {
       updatedAt: now,
       etag: record.etag,
       revision: 1,
+      starred: false,
       objectKey: record.objectKey,
       sizeBytes: record.sizeBytes,
       contentType: record.contentType,
@@ -181,6 +214,16 @@ export class MemoryDriveRepository implements DriveRepository {
     this.assertExpected(item, expectedEtag);
     this.assertAvailableName(parentId, item.name, item.id);
     item.parentId = parentId;
+    item.etag = newEtag;
+    item.revision += 1;
+    item.updatedAt = new Date();
+    return cloneItem(item);
+  }
+
+  async setStarred(id: UUID, starred: boolean, expectedEtag: string | undefined, newEtag: string): Promise<DriveItem> {
+    const item = this.requireActive(id);
+    this.assertExpected(item, expectedEtag);
+    item.starred = starred;
     item.etag = newEtag;
     item.revision += 1;
     item.updatedAt = new Date();

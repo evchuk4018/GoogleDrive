@@ -8,6 +8,7 @@ export type ApiDriveItem = {
   etag: string;
   createdAt: string;
   updatedAt: string;
+  starred: boolean;
   trashedAt: string | null;
   size: number | null;
   mimeType: string | null;
@@ -22,11 +23,13 @@ export function serializeItem(item: DriveItem): ApiDriveItem {
   if (item.kind === "folder") return {
     id: item.id, parentId: item.parentId, kind: item.kind, name: item.name, etag: item.etag,
     createdAt: item.createdAt.toISOString(), updatedAt: item.updatedAt.toISOString(),
+    starred: item.starred,
     trashedAt: item.trashedAt?.toISOString() ?? null, size: null, mimeType: null, sha256: null, revision: item.revision,
   };
   return {
     id: item.id, parentId: item.parentId, kind: item.kind, name: item.name, etag: item.etag,
     createdAt: item.createdAt.toISOString(), updatedAt: item.updatedAt.toISOString(),
+    starred: item.starred,
     trashedAt: item.trashedAt?.toISOString() ?? null, size: item.sizeBytes, mimeType: item.contentType,
     sha256: item.sha256, sizeBytes: item.sizeBytes, contentType: item.contentType,
     contentEtag: item.contentEtag, revision: item.revision,

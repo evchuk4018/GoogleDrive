@@ -4,6 +4,8 @@ export type UUID = string;
 export type ObjectKey = string;
 export type ETag = string;
 export type ItemKind = "folder" | "file";
+export type SearchSort = "name" | "updatedAt" | "size" | "kind";
+export type SearchDirection = "asc" | "desc";
 
 export type UploadSource =
   | Uint8Array
@@ -22,6 +24,7 @@ export interface ItemBase {
   /** Entity tag used for conditional metadata and content mutations. */
   etag: ETag;
   revision: number;
+  starred: boolean;
 }
 
 export interface FolderItem extends ItemBase {
@@ -53,6 +56,17 @@ export interface Page<T> {
 
 export interface SearchRequest extends PageRequest {
   query: string;
+}
+
+export interface SearchItemsOptions {
+  starred?: boolean;
+  kind?: ItemKind;
+  /** When present, restrict results to direct children of this location. */
+  parentId?: UUID | null;
+  modifiedAfter?: Date;
+  modifiedBefore?: Date;
+  sort?: SearchSort;
+  direction?: SearchDirection;
 }
 
 export interface CreateFolderRecord {
@@ -93,7 +107,7 @@ export interface ListChildrenRequest extends PageRequest {
   parentId: UUID | null;
 }
 
-export interface SearchItemsRequest extends SearchRequest {}
+export interface SearchItemsRequest extends SearchRequest, SearchItemsOptions {}
 
 /** Compatibility error for the existing HTTP helpers; new code uses domain errors.ts. */
 export class DriveError extends Error {

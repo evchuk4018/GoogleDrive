@@ -1,4 +1,4 @@
-import type { DriveApiErrorShape, DriveItem } from './drive-types';
+import type { DriveApiErrorShape, DriveItem, DriveItemChanges, DriveListOptions, DriveSearchOptions } from './drive-types';
 import { drivePublicPath } from '@/lib/config/drive-public-path';
 
 export class DriveApiError extends Error {
@@ -94,12 +94,12 @@ function jsonRequest<T>(path: string, method: 'PATCH' | 'POST', body: unknown) {
   });
 }
 
-function queryString(values: Record<string, string | undefined>) {
+function queryString(values: Record<string, string | number | boolean | undefined | null>) {
   const params = new URLSearchParams();
 
   for (const [key, value] of Object.entries(values)) {
-    if (value) {
-      params.set(key, value);
+    if (value !== undefined && value !== null && value !== '') {
+      params.set(key, String(value));
     }
   }
 
@@ -111,18 +111,37 @@ export function login(token: string) {
   return jsonRequest<unknown>('/api/auth/login', 'POST', { token });
 }
 
-export function listItems(parentId: string | null, includeTrash = false) {
+export function listItems(parentId: string | null, includeTrash = false, options: DriveListOptions = {}) {
   return request<unknown>(
     `/api/drive/items${queryString({
       parentId: parentId ?? undefined,
       includeTrash: includeTrash ? 'true' : undefined,
+      cursor: options.cursor,
+      limit: options.limit,
     })}`,
     { timeoutMs: DRIVE_READ_TIMEOUT_MS },
   );
 }
 
-export function searchItems(query: string) {
-  return request<unknown>(`/api/drive/search${queryString({ q: query })}`, { timeoutMs: DRIVE_READ_TIMEOUT_MS });
+function dateValue(value: string | Date | undefined): string | undefined {
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+export function searchItems(query: string, options: DriveSearchOptions = {}) {
+  const location = options.parentId !== undefined ? options.parentId : options.location;
+  return request<unknown>(`/api/drive/search${queryString({
+    q: query,
+    cursor: options.cursor,
+    limit: options.limit,
+    includeTrash: options.includeTrash,
+    starred: options.starred,
+    kind: options.kind,
+    parentId: location === null ? 'root' : location,
+    modifiedAfter: dateValue(options.modifiedAfter),
+    modifiedBefore: dateValue(options.modifiedBefore),
+    sort: options.sort,
+    direction: options.direction,
+  })}`, { timeoutMs: DRIVE_READ_TIMEOUT_MS });
 }
 
 export function createFolder(name: string, parentId: string | null) {
@@ -145,15 +164,15 @@ export function uploadFile(file: File, parentId: string | null) {
 }
 
 export function renameItem(itemId: string, name: string) {
-  return jsonRequest<unknown>(`/api/drive/items/${encodeURIComponent(itemId)}`, 'PATCH', {
-    name,
-  });
+  return updateItem(itemId, { name });
 }
 
 export function moveItem(itemId: string, parentId: string | null) {
-  return jsonRequest<unknown>(`/api/drive/items/${encodeURIComponent(itemId)}`, 'PATCH', {
-    parentId,
-  });
+  return updateItem(itemId, { parentId });
+}
+
+export function updateItem(itemId: string, changes: DriveItemChanges) {
+  return jsonRequest<unknown>(`/api/drive/items/${encodeURIComponent(itemId)}`, 'PATCH', changes);
 }
 
 export function trashItem(itemId: string) {
@@ -237,6 +256,7 @@ export function normalizeDriveItem(value: unknown): DriveItem | null {
     size: numberValue(value, 'size', 'sizeBytes', 'size_bytes', 'bytes'),
     updatedAt: stringValue(value, 'updatedAt', 'updated_at', 'modified_at'),
     parentId: stringValue(value, 'parentId', 'parent_id'),
+    starred: booleanValue(value, 'starred', 'is_starred'),
     trashed: booleanValue(value, 'trashed', 'is_trashed', 'deleted') || value.trashedAt != null,
   };
 }

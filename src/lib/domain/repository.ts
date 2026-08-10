@@ -41,6 +41,12 @@ export interface DriveRepository {
     expectedEtag: string | undefined,
     newEtag: string,
   ): Promise<DriveItem>;
+  setStarred(
+    id: UUID,
+    starred: boolean,
+    expectedEtag: string | undefined,
+    newEtag: string,
+  ): Promise<DriveItem>;
   replaceFile(record: ReplaceFileRecord): Promise<ReplaceFileResult>;
   trashSubtree(id: UUID, expectedEtag?: string): Promise<DriveItem[]>;
   restoreSubtree(id: UUID, expectedEtag?: string): Promise<DriveItem[]>;

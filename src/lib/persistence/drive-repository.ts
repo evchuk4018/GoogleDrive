@@ -17,7 +17,9 @@ import type {
   ListChildrenRequest,
   Page,
   ReplaceFileRecord,
+  SearchDirection,
   SearchItemsRequest,
+  SearchSort,
   UUID,
 } from "../domain/types";
 import {
@@ -38,6 +40,7 @@ export interface DriveItemRow extends QueryResultRow {
   name: string;
   etag: string;
   revision: number | string;
+  starred: boolean;
   trashed_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
@@ -57,6 +60,7 @@ const ITEM_COLUMNS = `
   name,
   etag,
   revision,
+  starred,
   trashed_at,
   created_at,
   updated_at,
@@ -66,6 +70,60 @@ const ITEM_COLUMNS = `
   sha256,
   content_etag
 `;
+
+type SearchSqlParts = {
+  expression: string;
+  outputExpression: string;
+  cursorType: "text" | "timestamptz" | "bigint";
+};
+
+function searchSqlParts(sort: SearchSort): SearchSqlParts {
+  switch (sort) {
+    case "updatedAt":
+      return { expression: "updated_at", outputExpression: "updated_at::text", cursorType: "timestamptz" };
+    case "size":
+      return { expression: "COALESCE(size_bytes, -1::bigint)", outputExpression: "COALESCE(size_bytes, -1::bigint)::text", cursorType: "bigint" };
+    case "kind":
+      return { expression: "kind::text", outputExpression: "kind::text", cursorType: "text" };
+    case "name":
+    default:
+      return { expression: "lower(name)", outputExpression: "lower(name)", cursorType: "text" };
+  }
+}
+
+export function buildSearchSql(sort: SearchSort = "name", direction: SearchDirection = "asc"): string {
+  if (sort !== "name" && sort !== "updatedAt" && sort !== "size" && sort !== "kind") {
+    throw new ValidationError("Search sort is invalid");
+  }
+  if (direction !== "asc" && direction !== "desc") {
+    throw new ValidationError("Search direction is invalid");
+  }
+  const parts = searchSqlParts(sort);
+  const orderDirection = direction === "desc" ? "DESC" : "ASC";
+  const cursorOperator = direction === "desc" ? "<" : ">";
+  return `
+    SELECT ${ITEM_COLUMNS}, ${parts.outputExpression} AS sort_key
+    FROM drive_items
+    WHERE ($1::boolean OR trashed_at IS NULL)
+      AND id <> '00000000-0000-4000-8000-000000000001'::uuid
+      AND (
+        $2::text = ''
+        OR lower(name) LIKE '%' || lower($2::text) || '%' ESCAPE '\\'
+      )
+      AND ($3::boolean IS NULL OR starred = $3::boolean)
+      AND ($4::text IS NULL OR kind::text = $4::text)
+      AND (NOT $5::boolean OR parent_id IS NOT DISTINCT FROM $6::uuid)
+      AND ($7::timestamptz IS NULL OR updated_at >= $7::timestamptz)
+      AND ($8::timestamptz IS NULL OR updated_at <= $8::timestamptz)
+      AND (
+        $9::text IS NULL
+        OR (${parts.expression} ${cursorOperator} $9::${parts.cursorType}
+          OR (${parts.expression} = $9::${parts.cursorType} AND id ${cursorOperator} $10::uuid))
+      )
+    ORDER BY ${parts.expression} ${orderDirection}, id ${orderDirection}
+    LIMIT $11::integer
+  `;
+}
 
 export const DRIVE_SQL = {
   findById: `
@@ -96,22 +154,7 @@ export const DRIVE_SQL = {
     ORDER BY lower(name), id
     LIMIT $5::integer
   `,
-  search: `
-    SELECT ${ITEM_COLUMNS}, lower(name) AS sort_key
-    FROM drive_items
-    WHERE ($1::boolean OR trashed_at IS NULL)
-      AND id <> '00000000-0000-4000-8000-000000000001'::uuid
-      AND (
-        $2::text = ''
-        OR lower(name) LIKE '%' || lower($2::text) || '%' ESCAPE '\\'
-      )
-      AND (
-        $3::text IS NULL
-        OR (lower(name), id) > ($3::text, $4::uuid)
-      )
-    ORDER BY lower(name), id
-    LIMIT $5::integer
-  `,
+  search: buildSearchSql(),
   isDescendant: `
     WITH RECURSIVE descendants AS (
       SELECT id
@@ -157,6 +200,17 @@ export const DRIVE_SQL = {
   moveItem: `
     UPDATE drive_items
     SET parent_id = $2::uuid,
+        etag = $4::text,
+        revision = revision + 1,
+        updated_at = now()
+    WHERE id = $1::uuid
+      AND trashed_at IS NULL
+      AND ($3::text IS NULL OR $3::text = '*' OR etag = $3::text)
+    RETURNING ${ITEM_COLUMNS}
+  `,
+  setStarred: `
+    UPDATE drive_items
+    SET starred = $2::boolean,
         etag = $4::text,
         revision = revision + 1,
         updated_at = now()
@@ -305,6 +359,7 @@ export function mapDriveItemRow(row: DriveItemRow): DriveItem {
     updatedAt: toDate(row.updated_at, "updated_at"),
     etag,
     revision,
+    starred: row.starred === true,
   } as const;
 
   if (row.kind === "folder") {
@@ -427,9 +482,18 @@ export class PostgresDriveRepository implements DriveRepository {
       throw new ValidationError("Repository page limit must be between 1 and 1000");
     }
     const cursor = decodePageCursor(request.cursor);
-    const result = await this.query<DriveItemRow>(DRIVE_SQL.search, [
+    const sort = request.sort ?? "name";
+    const direction = request.direction ?? "asc";
+    const parentFilter = request.parentId !== undefined;
+    const result = await this.query<DriveItemRow>(buildSearchSql(sort, direction), [
       request.includeTrashed ?? false,
       likeQuery,
+      request.starred ?? null,
+      request.kind ?? null,
+      parentFilter,
+      request.parentId ?? null,
+      request.modifiedAfter?.toISOString() ?? null,
+      request.modifiedBefore?.toISOString() ?? null,
       cursor?.sortKey ?? null,
       cursor?.id ?? null,
       limit + 1,
@@ -531,6 +595,26 @@ export class PostgresDriveRepository implements DriveRepository {
     const result = await this.query<DriveItemRow>(DRIVE_SQL.moveItem, [
       normalizedId,
       normalizedParent,
+      normalizedExpected ?? null,
+      assertETag(newEtag, "newEtag"),
+    ]);
+    if (result.rows[0]) return mapDriveItemRow(result.rows[0]);
+    await this.mutationCurrent(normalizedId, normalizedExpected);
+    throw new ConflictError(normalizedId, normalizedExpected);
+  }
+
+  async setStarred(
+    id: UUID,
+    starred: boolean,
+    expectedEtag: string | undefined,
+    newEtag: string,
+  ): Promise<DriveItem> {
+    const normalizedId = assertUuid(id);
+    if (typeof starred !== "boolean") throw new ValidationError("starred must be a boolean");
+    const normalizedExpected = expectedEtag === undefined ? undefined : assertETag(expectedEtag, "If-Match");
+    const result = await this.query<DriveItemRow>(DRIVE_SQL.setStarred, [
+      normalizedId,
+      starred,
       normalizedExpected ?? null,
       assertETag(newEtag, "newEtag"),
     ]);

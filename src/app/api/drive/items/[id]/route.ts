@@ -15,9 +15,10 @@ export async function PATCH(request: Request, context: Context) {
   const denied = await requireAuth(request); if (denied) return denied;
   try {
     const body = await jsonBody(request);
-    const changes: { name?: string; parentId?: string | null } = {};
+    const changes: { name?: string; parentId?: string | null; starred?: boolean } = {};
     if (body.name !== undefined) changes.name = typeof body.name === "string" ? body.name : "";
     if (body.parentId !== undefined) changes.parentId = body.parentId === null ? null : typeof body.parentId === "string" ? body.parentId : "";
+    if (body.starred !== undefined) changes.starred = body.starred as boolean;
     const item = await getDriveService().update((await context.params).id, changes, request.headers.get("if-match") ?? undefined);
     return NextResponse.json(serializeItem(item), { headers: { ETag: item.etag } });
   } catch (error) { return errorResponse(error); }
