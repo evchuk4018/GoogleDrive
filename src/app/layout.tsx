@@ -8,8 +8,18 @@ export const metadata: Metadata = {
   title: "Local Drive",
   description: "Private local file browser",
   manifest: drivePublicPath("/manifest.webmanifest"),
+  appleWebApp: {
+    capable: true,
+    title: "Drive",
+    statusBarStyle: "black-translucent",
+  },
   icons: {
     icon: drivePublicPath("/drive-icon.svg"),
+    apple: {
+      url: drivePublicPath("/apple-touch-icon.png"),
+      sizes: "180x180",
+      type: "image/png",
+    },
   },
 };
 

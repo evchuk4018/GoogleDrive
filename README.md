@@ -14,13 +14,30 @@ The production image sets `NEXT_PUBLIC_DRIVE_BASE_PATH=/drive` so browser assets
 
 ## Share files from a phone
 
-Drive is installable as a PWA and registers as a multi-file system share target. While connected to the private Tailscale network:
+Drive is installable as a PWA. Keep the app and phone connected to the private Tailscale network.
 
-1. Open the Drive URL in Chrome on Android, sign in, and use the browser menu to install or add Drive to the home screen.
+### Android
+
+1. Open the Drive URL in Chrome, sign in, and use the browser menu to install or add Drive to the home screen.
 2. From Photos or Files, select one or more items, tap Share, and choose Drive.
 3. Drive uploads the shared files to the My Drive root and reports any partial failures.
 
-Sharing requires an active network connection and an existing Drive session. The share target is primarily supported by Android Chromium browsers; it does not provide an offline upload queue.
+### iPhone with Shortcuts
+
+iOS does not reliably register a PWA as a native Photos/Files share target. Use an iOS Shortcut named `Drive Upload` instead:
+
+1. Create a new Shortcut, name it `Drive Upload`, enable **Show in Share Sheet**, and accept Files, Images, and Media.
+2. Add **Repeat with Each** using **Shortcut Input**.
+3. Inside the repeat, add **Get Details of Files** for the Repeat Item and select **Name**.
+4. Add **Get Contents of URL** with:
+   - URL: `https://homelab.tail861ffd.ts.net/drive/api/drive/upload`
+   - Method: `POST`
+   - Request Body: `File`, set to the Repeat Item
+   - Header `Authorization`: `Bearer YOUR_DRIVE_API_TOKEN`
+   - Header `X-Filename`: the file Name variable from the previous action
+5. Add a notification after the repeat, then select multiple photos or files, tap Share, and choose `Drive Upload`.
+
+The Shortcut uploads every shared item to the My Drive root through the existing raw upload API. It stores the full Drive API token, so do not share the Shortcut or publish it. Uploads require an active network connection; there is no offline queue.
 
 ## API
 
