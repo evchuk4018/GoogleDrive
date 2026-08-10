@@ -226,6 +226,7 @@ h2 { font-size: 1.35rem; letter-spacing: -.03em; line-height: 1.15; margin-block
 .action-link { background: transparent; border: 0; border-radius: 6px; color: var(--brand); font-size: .76rem; font-weight: 700; padding: 5px 6px; text-decoration: none; }
 .action-link:hover { background: var(--brand-soft); }
 .action-link-danger { color: var(--danger); }
+.download-error { color: var(--danger); font-size: .7rem; padding: 4px 6px; }
 
 .grid-wrap { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); padding: 20px 24px 25px; }
 .grid-card { background: var(--surface-raised); border: 1px solid var(--line); border-radius: 13px; display: flex; flex-direction: column; min-block-size: 162px; padding: 15px; position: relative; transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; }

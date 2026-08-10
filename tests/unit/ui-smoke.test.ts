@@ -63,4 +63,17 @@ describe("Drive UI render contract", () => {
     expect(textRoute).toContain('"Content-Type": "text/plain; charset=utf-8"');
     expect(textRoute).toContain("readText");
   });
+
+  it("keeps iOS standalone downloads in the native share flow", async () => {
+    const source = await readFile(path.resolve("src/components/drive/drive-browser.tsx"), "utf8");
+
+    expect(source).toContain("window.matchMedia('(display-mode: standalone)').matches");
+    expect(source).toContain("event.preventDefault()");
+    expect(source).toContain("credentials: 'include'");
+    expect(source).toContain("typeof navigator.canShare !== 'function'");
+    expect(source).toContain("navigator.share({ files: [file], title: item.name })");
+    expect(source).toContain("NotAllowedError");
+    expect(source).toContain("Tap again to open Save to Files.");
+    expect(source).toContain("Open Drive in Safari to download this file.");
+  });
 });

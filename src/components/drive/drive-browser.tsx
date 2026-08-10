@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ChangeEvent, FormEvent } from 'react';
+import type { ChangeEvent, FormEvent, MouseEvent as ReactMouseEvent } from 'react';
 
 import {
   createFolder,
@@ -39,7 +39,12 @@ type DialogState =
   | { kind: 'confirm'; item: DriveItem; action: 'trash' | 'permanent' }
   | { kind: 'bulk-confirm'; ids: string[]; action: 'trash' | 'permanent' };
 
+type DriveFileItem = DriveItem & { kind: 'file' };
 type PreviewState = { item: DriveItem; text: string | null; error: string | null };
+
+function isDriveFile(item: DriveItem): item is DriveFileItem {
+  return item.kind === 'file';
+}
 
 function isAuthError(error: unknown) {
   return error instanceof DriveApiError && (error.status === 401 || error.status === 403);
@@ -640,7 +645,101 @@ function ItemActionButtons({ disabled, isTrash, item, onMove, onPermanentDelete,
 
 function ItemDownloadAction({ isTrash, item }: Pick<ItemActionProps, 'isTrash' | 'item'>) {
   if (isTrash || item.kind !== 'file') return null;
-  return <a className="action-link" download href={drivePublicPath(`/api/drive/items/${encodeURIComponent(item.id)}/download`)}>Download</a>;
+  return <DriveDownloadLink className="action-link" item={item}>Download</DriveDownloadLink>;
+}
+
+function isIosStandalone() {
+  const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (!isIos) return false;
+
+  const navigatorWithStandalone = navigator as Navigator & { standalone?: boolean };
+  return Boolean(navigatorWithStandalone.standalone)
+    || (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches);
+}
+
+function isShareCancelled(error: unknown) {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
+function isShareActivationError(error: unknown) {
+  return error instanceof Error && error.name === 'NotAllowedError';
+}
+
+class FileShareUnavailableError extends Error {
+  constructor() {
+    super('File sharing is not available on this device.');
+    this.name = 'FileShareUnavailableError';
+  }
+}
+
+async function prepareDriveFile(item: DriveFileItem, href: string) {
+  const response = await fetch(href, { credentials: 'include' });
+  if (!response.ok) throw new Error(`The file could not be downloaded (${response.status}).`);
+
+  const blob = await response.blob();
+  return new File([blob], item.name, {
+    type: blob.type || item.mimeType || 'application/octet-stream',
+  });
+}
+
+async function shareDriveFile(item: DriveFileItem, file: File) {
+  if (typeof navigator.canShare !== 'function' || !navigator.canShare({ files: [file] })) {
+    throw new FileShareUnavailableError();
+  }
+
+  await navigator.share({ files: [file], title: item.name });
+}
+
+function DriveDownloadLink({ children, className, item }: { children: string; className: string; item: DriveItem }) {
+  const [downloadState, setDownloadState] = useState<'idle' | 'preparing' | 'ready' | 'error' | 'unsupported'>('idle');
+  const [preparedFile, setPreparedFile] = useState<File | null>(null);
+  const fileItem = isDriveFile(item) ? item : null;
+  if (!fileItem) return null;
+  const downloadableItem: DriveFileItem = fileItem;
+  const href = drivePublicPath(`/api/drive/items/${encodeURIComponent(downloadableItem.id)}/download`);
+
+  async function handleClick(event: ReactMouseEvent<HTMLAnchorElement>) {
+    if (!isIosStandalone()) return;
+
+    event.preventDefault();
+    if (downloadState === 'preparing') return;
+    setDownloadState('preparing');
+
+    let file = preparedFile;
+    try {
+      if (typeof navigator.share !== 'function') {
+        setPreparedFile(null);
+        setDownloadState('unsupported');
+        return;
+      }
+      file ??= await prepareDriveFile(downloadableItem, href);
+      const sharePromise = shareDriveFile(downloadableItem, file);
+      setPreparedFile(null);
+      setDownloadState('idle');
+      await sharePromise;
+    } catch (error) {
+      if (isShareCancelled(error)) {
+        setPreparedFile(null);
+        setDownloadState('idle');
+      } else if (isShareActivationError(error) && file) {
+        setPreparedFile(file);
+        setDownloadState('ready');
+      } else if (error instanceof FileShareUnavailableError) {
+        setPreparedFile(null);
+        setDownloadState('unsupported');
+      } else {
+        setDownloadState('error');
+      }
+    }
+  }
+
+  return <>
+    <a aria-busy={downloadState === 'preparing'} className={className} download href={href} onClick={(event) => void handleClick(event)}>{downloadState === 'preparing' ? 'Preparing…' : downloadState === 'ready' ? 'Tap to save' : children}</a>
+    {downloadState === 'error' ? <span aria-live="polite" className="download-error">Could not prepare this file. Try again.</span> : null}
+    {downloadState === 'ready' ? <span aria-live="polite" className="download-error">Tap again to open Save to Files.</span> : null}
+    {downloadState === 'unsupported' ? <span aria-live="polite" className="download-error">Open Drive in Safari to download this file.</span> : null}
+  </>;
 }
 
 function ItemActions(props: ItemActionProps) {
@@ -712,7 +811,7 @@ function DrivePreview({ preview, onClose }: { preview: PreviewState; onClose: ()
         {kind === 'pdf' ? <iframe className="preview-frame" title={`Preview of ${item.name}`} src={fileUrl} /> : null}
         {kind === 'audio' ? <audio className="preview-audio" controls src={fileUrl}>Your browser cannot play this audio file.</audio> : null}
         {kind === 'video' ? <video className="preview-video" controls src={fileUrl}>Your browser cannot play this video file.</video> : null}
-        {kind === 'unsupported' ? <div className="preview-unsupported"><DriveIcon name="file" size={38} /><strong>Preview unavailable</strong><span>This file type can’t be previewed here.</span><a className="button button-primary" download href={drivePublicPath(`/api/drive/items/${encodeURIComponent(item.id)}/download`)}>Download file</a></div> : null}
+        {kind === 'unsupported' ? <div className="preview-unsupported"><DriveIcon name="file" size={38} /><strong>Preview unavailable</strong><span>This file type can’t be previewed here.</span><DriveDownloadLink className="button button-primary" item={item}>Download file</DriveDownloadLink></div> : null}
       </div>
     </section>
   </div>;
