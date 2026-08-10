@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
 
 import {
@@ -14,38 +14,92 @@ import {
   restoreItem,
   searchItems,
   trashItem,
+  updateItem,
   uploadFile,
 } from './drive-api';
-import type { DriveBreadcrumb, DriveItem, DriveView } from './drive-types';
-import { formatFileSize, formatUpdatedAt, getErrorMessage, sortDriveItems } from './drive-utils';
+import type { DriveBreadcrumb, DriveItem } from './drive-types';
+import { DriveIcon } from './drive-icons';
+import { formatFileSize, formatUpdatedAt, getErrorMessage } from './drive-utils';
 import { LoginForm } from './login-form';
 import { drivePublicPath } from '@/lib/config/drive-public-path';
 
 type AuthState = 'checking' | 'signed-out' | 'signed-in' | 'error';
+type BrowserView = 'drive' | 'recent' | 'starred' | 'trash';
+type ViewMode = 'list' | 'grid';
+type FilterType = 'all' | 'folder' | 'file';
+type ModifiedFilter = 'any' | 'today' | 'week' | 'month';
+type SortKey = 'name' | 'updated' | 'size' | 'type';
 
 type DialogState =
   | { kind: 'folder' }
   | { kind: 'rename'; item: DriveItem }
   | { kind: 'move'; item: DriveItem }
-  | { kind: 'confirm'; item: DriveItem; action: 'trash' | 'permanent' };
+  | { kind: 'bulk-move'; ids: string[] }
+  | { kind: 'confirm'; item: DriveItem; action: 'trash' | 'permanent' }
+  | { kind: 'bulk-confirm'; ids: string[]; action: 'trash' | 'permanent' };
 
 function isAuthError(error: unknown) {
   return error instanceof DriveApiError && (error.status === 401 || error.status === 403);
 }
 
-function initialBreadcrumb(view: DriveView): DriveBreadcrumb[] {
+function initialBreadcrumb(view: BrowserView): DriveBreadcrumb[] {
   return [{ id: null, name: view === 'trash' ? 'Trash' : 'My Drive' }];
+}
+
+function viewTitle(view: BrowserView) {
+  if (view === 'recent') return 'Recent';
+  if (view === 'starred') return 'Starred';
+  if (view === 'trash') return 'Trash';
+  return 'My Drive';
+}
+
+function fileLabel(item: DriveItem) {
+  if (item.kind === 'folder') return 'Folder';
+  if (item.mimeType === 'application/pdf') return 'PDF';
+  if (item.mimeType?.includes('spreadsheet')) return 'Spreadsheet';
+  if (item.mimeType?.includes('document')) return 'Document';
+  if (item.mimeType?.startsWith('image/')) return 'Image';
+  if (item.mimeType?.startsWith('video/')) return 'Video';
+  if (item.mimeType?.startsWith('audio/')) return 'Audio';
+  const extension = item.name.split('.').pop();
+  return extension && extension !== item.name ? extension.toUpperCase() : 'File';
+}
+
+function compareItems(left: DriveItem, right: DriveItem, sortKey: SortKey) {
+  if (sortKey === 'name') return left.name.localeCompare(right.name, undefined, { sensitivity: 'base' });
+  if (sortKey === 'type') return fileLabel(left).localeCompare(fileLabel(right), undefined, { sensitivity: 'base' });
+  if (sortKey === 'size') return (left.size ?? -1) - (right.size ?? -1);
+  return (left.updatedAt ? Date.parse(left.updatedAt) : 0) - (right.updatedAt ? Date.parse(right.updatedAt) : 0);
+}
+
+function sortItems(items: DriveItem[], sortKey: SortKey, direction: 'asc' | 'desc') {
+  return [...items].sort((left, right) => {
+    const difference = compareItems(left, right, sortKey);
+    if (difference !== 0) return direction === 'asc' ? difference : -difference;
+    if (left.kind !== right.kind) return left.kind === 'folder' ? -1 : 1;
+    return left.name.localeCompare(right.name, undefined, { sensitivity: 'base' });
+  });
 }
 
 export function DriveBrowser() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [authState, setAuthState] = useState<AuthState>('checking');
-  const [view, setView] = useState<DriveView>('drive');
+  const [view, setView] = useState<BrowserView>('drive');
   const [parentId, setParentId] = useState<string | null>(null);
   const [breadcrumbs, setBreadcrumbs] = useState<DriveBreadcrumb[]>(initialBreadcrumb('drive'));
   const [items, setItems] = useState<DriveItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeSearch, setActiveSearch] = useState('');
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterType, setFilterType] = useState<FilterType>('all');
+  const [modifiedFilter, setModifiedFilter] = useState<ModifiedFilter>('any');
+  const [locationFilter, setLocationFilter] = useState<'all' | 'current'>('all');
+  const [starredOnly, setStarredOnly] = useState(false);
+  const [sortKey, setSortKey] = useState<SortKey>('name');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
@@ -54,14 +108,31 @@ export function DriveBrowser() {
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
+  const isTrash = view === 'trash';
+  const selectedItems = useMemo(() => items.filter((item) => selectedIds.has(item.id)), [items, selectedIds]);
+  const hasFilters = filterType !== 'all' || modifiedFilter !== 'any' || locationFilter !== 'all' || starredOnly;
+  const isSearching = Boolean(activeSearch || hasFilters || view === 'recent' || view === 'starred');
+
   const loadItems = useCallback(async () => {
     setLoading(true);
 
     try {
-      const payload = activeSearch
-        ? await searchItems(activeSearch)
-        : await listItems(parentId, view === 'trash');
-      setItems(sortDriveItems(normalizeDriveItems(payload)));
+      const shouldSearch = Boolean(activeSearch || hasFilters || view === 'recent' || view === 'starred');
+      const modifiedAfter = modifiedFilter === 'any'
+        ? undefined
+        : new Date(Date.now() - (modifiedFilter === 'today' ? 24 : modifiedFilter === 'week' ? 24 * 7 : 24 * 30) * 60 * 60 * 1000);
+      const payload = shouldSearch
+        ? await searchItems(activeSearch, {
+            includeTrash: isTrash,
+            starred: view === 'starred' || starredOnly ? true : undefined,
+            kind: filterType === 'all' ? undefined : filterType,
+            parentId: locationFilter === 'current' ? parentId : undefined,
+            modifiedAfter,
+            sort: view === 'recent' ? 'updatedAt' : sortKey === 'updated' ? 'updatedAt' : sortKey === 'type' ? 'kind' : sortKey,
+            direction: view === 'recent' ? 'desc' : sortDirection,
+          })
+        : await listItems(parentId, isTrash);
+      setItems(sortItems(normalizeDriveItems(payload), sortKey, sortDirection));
       setAuthState('signed-in');
       setError(null);
     } catch (loadError) {
@@ -75,22 +146,17 @@ export function DriveBrowser() {
     } finally {
       setLoading(false);
     }
-  }, [activeSearch, parentId, view]);
+  }, [activeSearch, filterType, hasFilters, isTrash, locationFilter, modifiedFilter, parentId, sortDirection, sortKey, starredOnly, view]);
 
   useEffect(() => {
     void loadItems();
   }, [loadItems]);
 
   useEffect(() => {
-    if (!dialog) {
-      return undefined;
-    }
+    if (!dialog) return undefined;
 
     function handleEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape' && !busyAction) {
-        setDialog(null);
-        setDialogError(null);
-      }
+      if (event.key === 'Escape' && !busyAction) closeDialog();
     }
 
     window.addEventListener('keydown', handleEscape);
@@ -109,42 +175,60 @@ export function DriveBrowser() {
     setActiveSearch('');
   }
 
-  function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const query = searchTerm.trim();
-
-    if (query === activeSearch) {
-      void loadItems();
-    } else {
-      setActiveSearch(query);
-    }
+  function clearFilters() {
+    setFilterType('all');
+    setModifiedFilter('any');
+    setLocationFilter('all');
+    setStarredOnly(false);
   }
 
-  function selectView(nextView: DriveView) {
+  function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setActiveSearch(searchTerm.trim());
+    setSelectedIds(new Set());
+  }
+
+  function selectView(nextView: BrowserView) {
     setView(nextView);
     setParentId(null);
     setBreadcrumbs(initialBreadcrumb(nextView));
     resetSearch();
+    clearFilters();
+    setSelectedIds(new Set());
     setStatusMessage(null);
+    setSidebarOpen(false);
   }
 
   function navigateToBreadcrumb(index: number) {
     const nextBreadcrumbs = breadcrumbs.slice(0, index + 1);
     setBreadcrumbs(nextBreadcrumbs);
     setParentId(nextBreadcrumbs[nextBreadcrumbs.length - 1]?.id ?? null);
+    setView('drive');
     resetSearch();
+    setSelectedIds(new Set());
   }
 
   function openFolder(item: DriveItem) {
-    if (item.kind !== 'folder' || view === 'trash') {
-      return;
-    }
-
+    if (item.kind !== 'folder' || isTrash) return;
     setView('drive');
     setParentId(item.id);
     setBreadcrumbs((current) => [...current, { id: item.id, name: item.name }]);
     resetSearch();
+    setSelectedIds(new Set());
     setStatusMessage(null);
+  }
+
+  function toggleSelected(itemId: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds((current) => current.size === items.length ? new Set() : new Set(items.map((item) => item.id)));
   }
 
   function openFolderDialog() {
@@ -165,17 +249,26 @@ export function DriveBrowser() {
     setDialogError(null);
   }
 
+  function openBulkMoveDialog() {
+    setDialog({ kind: 'bulk-move', ids: [...selectedIds] });
+    setDialogValue(parentId ?? '');
+    setDialogError(null);
+  }
+
   function openConfirmDialog(item: DriveItem, action: 'trash' | 'permanent') {
     setDialog({ kind: 'confirm', item, action });
     setDialogValue('');
     setDialogError(null);
   }
 
-  function closeDialog() {
-    if (busyAction) {
-      return;
-    }
+  function openBulkConfirmDialog(action: 'trash' | 'permanent') {
+    setDialog({ kind: 'bulk-confirm', ids: [...selectedIds], action });
+    setDialogValue('');
+    setDialogError(null);
+  }
 
+  function closeDialog() {
+    if (busyAction) return;
     setDialog(null);
     setDialogValue('');
     setDialogError(null);
@@ -193,15 +286,10 @@ export function DriveBrowser() {
   async function handleUploadChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = '';
-
-    if (!file) {
-      return;
-    }
-
+    if (!file) return;
     setBusyAction('upload');
     setError(null);
     setStatusMessage(null);
-
     try {
       await uploadFile(file, parentId);
       setStatusMessage(`${file.name} uploaded.`);
@@ -217,7 +305,6 @@ export function DriveBrowser() {
     setBusyAction(`restore-${item.id}`);
     setError(null);
     setStatusMessage(null);
-
     try {
       await restoreItem(item.id);
       setStatusMessage(`${item.name} restored.`);
@@ -229,36 +316,57 @@ export function DriveBrowser() {
     }
   }
 
+  async function toggleStar(item: DriveItem) {
+    const nextStarred = !item.starred;
+    setItems((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, starred: nextStarred } : candidate));
+    try {
+      await updateItem(item.id, { starred: nextStarred });
+      setStatusMessage(nextStarred ? `${item.name} added to Starred.` : `${item.name} removed from Starred.`);
+      if (view === 'starred' && !nextStarred) await loadItems();
+    } catch (starError) {
+      setItems((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, starred: item.starred } : candidate));
+      handleMutationError(starError);
+    }
+  }
+
+  async function runBulkMutation(action: 'star' | 'unstar' | 'trash' | 'restore' | 'permanent' | 'move', destination?: string | null) {
+    const targets = [...selectedItems];
+    if (!targets.length) return;
+    setBusyAction('bulk');
+    setError(null);
+    setStatusMessage(null);
+    const results = await Promise.allSettled(targets.map((item) => {
+      if (action === 'star' || action === 'unstar') return updateItem(item.id, { starred: action === 'star' });
+      if (action === 'trash') return trashItem(item.id);
+      if (action === 'restore') return restoreItem(item.id);
+      if (action === 'permanent') return permanentlyDeleteItem(item.id);
+      return moveItem(item.id, destination ?? null);
+    }));
+    const failed = results.filter((result) => result.status === 'rejected');
+    setSelectedIds(new Set());
+    setStatusMessage(failed.length ? `${targets.length - failed.length} items updated; ${failed.length} failed.` : `${targets.length} items updated.`);
+    if (failed.length) setError('Some selected items could not be updated. Review the list and try again.');
+    await loadItems();
+    setBusyAction(null);
+  }
+
   async function handleDialogSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    if (!dialog) {
-      return;
-    }
-
+    if (!dialog) return;
     const value = dialogValue.trim();
-
-    if (dialog.kind !== 'confirm' && dialog.kind !== 'move' && !value) {
-      setDialogError('Enter a name for this folder.');
+    if ((dialog.kind === 'folder' || dialog.kind === 'rename') && !value) {
+      setDialogError(dialog.kind === 'folder' ? 'Enter a name for this folder.' : 'Enter a new name.');
       return;
     }
-
-    if (dialog.kind === 'rename' && !value) {
-      setDialogError('Enter a new name.');
-      return;
-    }
-
-    if (dialog.kind === 'move' && value === dialog.item.parentId) {
+    if ((dialog.kind === 'move' || dialog.kind === 'bulk-move') && value === (dialog.kind === 'move' ? dialog.item.parentId : parentId)) {
       setDialogError('Choose a different destination folder.');
       return;
     }
-
-    const actionId = dialog.kind === 'folder' ? 'folder-new' : `${dialog.kind}-${dialog.item.id}`;
+    const actionId = dialog.kind === 'folder' ? 'folder-new' : `dialog-${Date.now()}`;
     setBusyAction(actionId);
     setDialogError(null);
     setError(null);
     setStatusMessage(null);
-
     try {
       if (dialog.kind === 'folder') {
         await createFolder(value, parentId);
@@ -269,14 +377,23 @@ export function DriveBrowser() {
       } else if (dialog.kind === 'move') {
         await moveItem(dialog.item.id, value || null);
         setStatusMessage(`${dialog.item.name} moved.`);
-      } else if (dialog.action === 'trash') {
-        await trashItem(dialog.item.id);
-        setStatusMessage(`${dialog.item.name} moved to Trash.`);
+      } else if (dialog.kind === 'bulk-move') {
+        setBusyAction('bulk');
+        await runBulkMutation('move', value || null);
+        closeDialog();
+        return;
+      } else if (dialog.kind === 'confirm') {
+        if (dialog.action === 'trash') await trashItem(dialog.item.id);
+        else await permanentlyDeleteItem(dialog.item.id);
+        setStatusMessage(dialog.action === 'trash' ? `${dialog.item.name} moved to Trash.` : `${dialog.item.name} permanently deleted.`);
       } else {
-        await permanentlyDeleteItem(dialog.item.id);
-        setStatusMessage(`${dialog.item.name} permanently deleted.`);
+        setBusyAction('bulk');
+        const targets = items.filter((item) => dialog.ids.includes(item.id));
+        const results = await Promise.allSettled(targets.map((item) => dialog.action === 'trash' ? trashItem(item.id) : permanentlyDeleteItem(item.id)));
+        const failed = results.filter((result) => result.status === 'rejected').length;
+        setSelectedIds(new Set());
+        setStatusMessage(failed ? `${targets.length - failed} items updated; ${failed} failed.` : `${targets.length} items updated.`);
       }
-
       setDialog(null);
       setDialogValue('');
       await loadItems();
@@ -287,34 +404,19 @@ export function DriveBrowser() {
     }
   }
 
-  if (authState === 'checking') {
-    return <LoadingScreen label="Checking your Drive session…" />;
-  }
+  if (authState === 'checking') return <LoadingScreen label="Checking your Drive session…" />;
 
   if (authState === 'signed-out') {
     return (
       <main className="login-page">
         <div className="login-card">
-          <a className="brand brand-centered" href={drivePublicPath('/')}>
-            <span aria-hidden="true" className="brand-mark">
-              D
-            </span>
-            <span>Drive</span>
-          </a>
+          <a className="brand brand-centered" href={drivePublicPath('/')}><span aria-hidden="true" className="brand-mark">D</span><span>Drive</span></a>
           <p className="eyebrow">Private storage</p>
           <h1>Sign in to Drive</h1>
-          <p className="login-intro">
-            Enter the API token for this private Drive service to browse your files.
-          </p>
-          {error ? (
-            <p aria-live="polite" className="form-error" role="alert">
-              {error}
-            </p>
-          ) : null}
+          <p className="login-intro">Enter the API token for this private Drive service to browse your files.</p>
+          {error ? <p aria-live="polite" className="form-error" role="alert">{error}</p> : null}
           <LoginForm onSuccess={handleAuthSuccess} />
-          <p className="login-footer">
-            <a href={drivePublicPath('/login')}>Open the dedicated sign-in page</a>
-          </p>
+          <p className="login-footer"><a href={drivePublicPath('/login')}>Open the dedicated sign-in page</a></p>
         </div>
       </main>
     );
@@ -324,427 +426,170 @@ export function DriveBrowser() {
     return (
       <main className="login-page">
         <div className="login-card">
-          <a className="brand brand-centered" href={drivePublicPath('/')}>
-            <span aria-hidden="true" className="brand-mark">
-              D
-            </span>
-            <span>Drive</span>
-          </a>
+          <a className="brand brand-centered" href={drivePublicPath('/')}><span aria-hidden="true" className="brand-mark">D</span><span>Drive</span></a>
           <p className="eyebrow">Private storage</p>
           <h1>Drive is unavailable</h1>
           <p className="login-intro">Drive could not be reached while checking your session.</p>
-          {error ? (
-            <p aria-live="polite" className="form-error" role="alert">
-              {error}
-            </p>
-          ) : null}
-          <button
-            className="button button-primary button-full"
-            onClick={() => {
-              setAuthState('checking');
-              setError(null);
-              void loadItems();
-            }}
-            type="button"
-          >
-            Try again
-          </button>
+          {error ? <p aria-live="polite" className="form-error" role="alert">{error}</p> : null}
+          <button className="button button-primary button-full" onClick={() => { setAuthState('checking'); setError(null); void loadItems(); }} type="button">Try again</button>
         </div>
       </main>
     );
   }
 
-  const isTrash = view === 'trash';
+  const selectedCount = selectedIds.size;
+  const allSelected = items.length > 0 && selectedCount === items.length;
 
   return (
-    <div className="drive-app">
-      <header className="drive-header">
-        <a className="brand" href={drivePublicPath('/')}>
-          <span aria-hidden="true" className="brand-mark">
-            D
-          </span>
-          <span>Drive</span>
-        </a>
-        <nav aria-label="Drive views" className="view-nav">
-          <button
-            className={view === 'drive' ? 'view-tab view-tab-active' : 'view-tab'}
-            onClick={() => selectView('drive')}
-            type="button"
-          >
-            My Drive
-          </button>
-          <button
-            className={view === 'trash' ? 'view-tab view-tab-active' : 'view-tab'}
-            onClick={() => selectView('trash')}
-            type="button"
-          >
-            Trash
-          </button>
-        </nav>
-        <div className="header-meta">
-          <span className="session-dot" />
-          <span>Session active</span>
-          <a className="header-link" href={drivePublicPath('/login')}>
-            Sign in again
-          </a>
+    <div className={`drive-app ${sidebarOpen ? 'sidebar-open' : ''}`}>
+      <header className="drive-topbar">
+        <button aria-label="Open navigation" className="icon-button topbar-menu" onClick={() => setSidebarOpen(true)} type="button"><DriveIcon name="menu" /></button>
+        <a className="brand topbar-brand" href={drivePublicPath('/')}><span aria-hidden="true" className="brand-mark">D</span><span>Drive</span></a>
+        <form className="search-shell" onSubmit={handleSearchSubmit} role="search">
+          <DriveIcon name="search" size={21} />
+          <label className="sr-only" htmlFor="drive-search">Search files and folders</label>
+          <input id="drive-search" onChange={(event) => setSearchTerm(event.target.value)} placeholder="Search in Drive" type="search" value={searchTerm} />
+          {searchTerm ? <button aria-label="Clear search" className="search-clear" onClick={resetSearch} type="button"><DriveIcon name="close" size={17} /></button> : null}
+          <button aria-label="Search" className="search-submit" type="submit"><DriveIcon name="arrow-down" size={17} /></button>
+        </form>
+        <div className="header-actions">
+          <button aria-label="Drive suggestions" className="header-action" type="button"><DriveIcon name="sparkle" /></button>
+          <button aria-label="Account" className="header-action avatar" type="button">E</button>
         </div>
       </header>
 
-      <main className="drive-main">
-        <section aria-labelledby="drive-heading" className="drive-panel">
-          <div className="drive-heading-row">
-            <div>
-              <p className="eyebrow">{isTrash ? 'Deleted items' : 'Private storage'}</p>
-              <h1 id="drive-heading">{isTrash ? 'Trash' : 'My Drive'}</h1>
+      <div aria-hidden={!sidebarOpen} className="sidebar-scrim" onClick={() => setSidebarOpen(false)} />
+      <div className="drive-layout">
+        <aside aria-label="Drive navigation" className="drive-sidebar">
+          <button className="new-button" disabled={busyAction !== null} onClick={openFolderDialog} type="button"><DriveIcon name="plus" size={21} />New</button>
+          <nav className="sidebar-nav">
+            <button className={`sidebar-link ${view === 'drive' ? 'sidebar-link-active' : ''}`} onClick={() => selectView('drive')} type="button"><DriveIcon name="home" />My Drive</button>
+            <button className={`sidebar-link ${view === 'recent' ? 'sidebar-link-active' : ''}`} onClick={() => selectView('recent')} type="button"><DriveIcon name="clock" />Recent</button>
+            <button className={`sidebar-link ${view === 'starred' ? 'sidebar-link-active' : ''}`} onClick={() => selectView('starred')} type="button"><DriveIcon name="star" />Starred</button>
+            <button className={`sidebar-link ${view === 'trash' ? 'sidebar-link-active' : ''}`} onClick={() => selectView('trash')} type="button"><DriveIcon name="trash" />Trash</button>
+            <p className="sidebar-nav-section">Workspace</p>
+            <button className="sidebar-link" onClick={() => { setStatusMessage('Sharing is available for a future Drive connection.'); setSidebarOpen(false); }} type="button"><DriveIcon name="share" />Shared</button>
+            <a className="sidebar-link sidebar-footer-link" href={drivePublicPath('/login')}><DriveIcon name="settings" />Settings</a>
+          </nav>
+          <div className="storage-card">
+            <p className="storage-label"><DriveIcon name="archive" size={17} />Storage</p>
+            <div aria-label="Storage used: 22 percent" className="storage-track"><div className="storage-fill" /></div>
+            <p className="storage-copy">Storage usage is managed by the private server.</p>
+          </div>
+          <div className="sidebar-footer"><a className="sidebar-footer-link" href={drivePublicPath('/login')}>Session active · Sign in again</a></div>
+        </aside>
+
+        <main className="drive-content">
+          <div className="content-inner">
+            <div className="page-header">
+              <div><p className="eyebrow">Private storage</p><h1>{viewTitle(view)}</h1></div>
+              <div aria-live="polite" className="heading-summary"><span className="summary-dot" />{items.length} {items.length === 1 ? 'item' : 'items'}</div>
             </div>
-            <div className="heading-count" aria-live="polite">
-              {items.length} {items.length === 1 ? 'item' : 'items'}
-            </div>
-          </div>
 
-          <div className="toolbar">
-            <nav aria-label="Breadcrumb" className="breadcrumbs">
-              {breadcrumbs.map((breadcrumb, index) => (
-                <span className="breadcrumb-segment" key={`${breadcrumb.id ?? 'root'}-${index}`}>
-                  {index > 0 ? (
-                    <span aria-hidden="true" className="breadcrumb-divider">
-                      /
-                    </span>
-                  ) : null}
-                  <button
-                    className={index === breadcrumbs.length - 1 ? 'breadcrumb-current' : ''}
-                    onClick={() => navigateToBreadcrumb(index)}
-                    type="button"
-                  >
-                    {breadcrumb.name}
-                  </button>
-                </span>
-              ))}
-            </nav>
-            <form className="search-form" onSubmit={handleSearchSubmit} role="search">
-              <label className="sr-only" htmlFor="drive-search">
-                Search files and folders
-              </label>
-              <input
-                id="drive-search"
-                onChange={(event) => setSearchTerm(event.target.value)}
-                placeholder="Search files and folders"
-                type="search"
-                value={searchTerm}
-              />
-              <button className="button button-secondary" type="submit">
-                Search
-              </button>
-              {activeSearch ? (
-                <button className="button button-quiet" onClick={resetSearch} type="button">
-                  Clear
-                </button>
-              ) : null}
-            </form>
-          </div>
-
-          <div className="action-row">
-            <div className="action-row-left">
-              {!isTrash ? (
-                <>
-                  <input
-                    className="sr-only"
-                    id="drive-upload"
-                    onChange={handleUploadChange}
-                    ref={fileInputRef}
-                    type="file"
-                  />
-                  <button
-                    className="button button-primary"
-                    disabled={busyAction !== null}
-                    onClick={() => fileInputRef.current?.click()}
-                    type="button"
-                  >
-                    {busyAction === 'upload' ? 'Uploading…' : 'Upload file'}
-                  </button>
-                  <button
-                    className="button button-secondary"
-                    disabled={busyAction !== null}
-                    onClick={openFolderDialog}
-                    type="button"
-                  >
-                    New folder
-                  </button>
-                </>
-              ) : (
-                <p className="toolbar-hint">Items in Trash can be restored or permanently deleted.</p>
-              )}
-            </div>
-            {activeSearch ? (
-              <p className="toolbar-hint">
-                Results for <strong>“{activeSearch}”</strong>
-              </p>
-            ) : null}
-          </div>
-
-          {statusMessage ? (
-            <p aria-live="polite" className="status-message" role="status">
-              {statusMessage}
-            </p>
-          ) : null}
-          {error ? (
-            <p aria-live="assertive" className="form-error page-error" role="alert">
-              {error}
-            </p>
-          ) : null}
-
-          <div aria-busy={loading} className="table-wrap">
-            <table className="item-table">
-              <caption className="sr-only">
-                {isTrash ? 'Files and folders in Trash' : 'Files and folders in My Drive'}
-              </caption>
-              <thead>
-                <tr>
-                  <th scope="col">Name</th>
-                  <th scope="col">Type</th>
-                  <th scope="col">Updated</th>
-                  <th scope="col">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td className="table-message" colSpan={4}>
-                      Loading items…
-                    </td>
-                  </tr>
-                ) : items.length === 0 ? (
-                  <tr>
-                    <td className="table-message" colSpan={4}>
-                      <EmptyState isTrash={isTrash} isSearching={Boolean(activeSearch)} />
-                    </td>
-                  </tr>
-                ) : (
-                  items.map((item) => (
-                    <tr key={item.id}>
-                      <td>
-                        <div className="item-name-cell">
-                          <span aria-hidden="true" className="item-glyph">
-                            {item.kind === 'folder' ? '▰' : '▱'}
-                          </span>
-                          {item.kind === 'folder' && !isTrash ? (
-                            <button className="item-name-link" onClick={() => openFolder(item)} type="button">
-                              {item.name}
-                            </button>
-                          ) : (
-                            <span className="item-name-text">{item.name}</span>
-                          )}
-                        </div>
-                      </td>
-                      <td>{item.kind === 'folder' ? 'Folder' : item.mimeType ?? 'File'}</td>
-                      <td>
-                        <span className="date-cell">{formatUpdatedAt(item.updatedAt)}</span>
-                        {item.kind === 'file' ? (
-                          <span className="size-cell">{formatFileSize(item.size)}</span>
-                        ) : null}
-                      </td>
-                      <td>
-                        <div aria-label={`Actions for ${item.name}`} className="item-actions">
-                          {isTrash ? (
-                            <>
-                              <button
-                                className="action-link"
-                                disabled={busyAction !== null}
-                                onClick={() => void handleRestore(item)}
-                                type="button"
-                              >
-                                {busyAction === `restore-${item.id}` ? 'Restoring…' : 'Restore'}
-                              </button>
-                              <button
-                                className="action-link action-link-danger"
-                                disabled={busyAction !== null}
-                                onClick={() => openConfirmDialog(item, 'permanent')}
-                                type="button"
-                              >
-                                Delete forever
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <button
-                                className="action-link"
-                                disabled={busyAction !== null}
-                                onClick={() => openRenameDialog(item)}
-                                type="button"
-                              >
-                                Rename
-                              </button>
-                              <button
-                                className="action-link"
-                                disabled={busyAction !== null}
-                                onClick={() => openMoveDialog(item)}
-                                type="button"
-                              >
-                                Move
-                              </button>
-                              <button
-                                className="action-link action-link-danger"
-                                disabled={busyAction !== null}
-                                onClick={() => openConfirmDialog(item, 'trash')}
-                                type="button"
-                              >
-                                Trash
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </main>
-
-      {dialog ? (
-        <div className="dialog-backdrop">
-          <section
-            aria-describedby="drive-dialog-description"
-            aria-labelledby="drive-dialog-title"
-            aria-modal="true"
-            className="dialog-card"
-            role="dialog"
-          >
-            <div className="dialog-header">
-              <div>
-                <p className="eyebrow">Drive action</p>
-                <h2 id="drive-dialog-title">
-                  {dialog.kind === 'folder'
-                    ? 'Create a folder'
-                    : dialog.kind === 'rename'
-                      ? 'Rename item'
-                      : dialog.kind === 'move'
-                        ? 'Move item'
-                        : dialog.action === 'trash'
-                          ? 'Move to Trash?'
-                          : 'Delete permanently?'}
-                </h2>
+            <section aria-labelledby="drive-heading" className="drive-panel">
+              <h2 className="sr-only" id="drive-heading">{viewTitle(view)} files and folders</h2>
+              <div className="breadcrumb-row">
+                <nav aria-label="Breadcrumb" className="breadcrumbs">
+                  {breadcrumbs.map((breadcrumb, index) => <span className="breadcrumb-segment" key={`${breadcrumb.id ?? 'root'}-${index}`}>
+                    {index > 0 ? <span aria-hidden="true" className="breadcrumb-divider"><DriveIcon name="chevron-right" size={15} /></span> : null}
+                    <button className={index === breadcrumbs.length - 1 ? 'breadcrumb-current' : ''} onClick={() => navigateToBreadcrumb(index)} type="button">{breadcrumb.name}</button>
+                  </span>)}
+                </nav>
+                <span className="current-location"><DriveIcon name="archive" size={15} />Private Drive</span>
               </div>
-              <button aria-label="Close dialog" className="dialog-close" onClick={closeDialog} type="button">
-                ×
-              </button>
-            </div>
 
-            <p className="dialog-description" id="drive-dialog-description">
-              {dialog.kind === 'folder'
-                ? 'Create a new folder in the current location.'
-                : dialog.kind === 'rename'
-                  ? `Choose a new name for ${dialog.item.name}.`
-                  : dialog.kind === 'move'
-                    ? 'Enter a destination folder ID. Leave it blank to move the item to My Drive.'
-                    : dialog.action === 'trash'
-                      ? `${dialog.item.name} can be restored from Trash later.`
-                      : `${dialog.item.name} and its contents will be permanently removed. This cannot be undone.`}
-            </p>
-
-            <form className="dialog-form" onSubmit={handleDialogSubmit}>
-              {dialog.kind === 'folder' ? (
-                <div className="field-group">
-                  <label htmlFor="dialog-folder-name">Folder name</label>
-                  <input
-                    autoFocus
-                    id="dialog-folder-name"
-                    onChange={(event) => setDialogValue(event.target.value)}
-                    placeholder="New folder"
-                    required
-                    value={dialogValue}
-                  />
+              <div className="filter-bar">
+                <button aria-expanded={filterOpen} className={`filter-button ${filterOpen || hasFilters ? 'filter-button-active' : ''}`} onClick={() => setFilterOpen((current) => !current)} type="button"><DriveIcon name="settings" size={16} />Filters{hasFilters ? ` · ${[filterType !== 'all', modifiedFilter !== 'any', locationFilter !== 'all', starredOnly].filter(Boolean).length}` : ''}</button>
+                {activeSearch ? <span className="filter-chip">“{activeSearch}” <button aria-label="Remove search" onClick={resetSearch} type="button"><DriveIcon name="close" size={13} /></button></span> : null}
+                {view === 'starred' ? <span className="filter-chip"><DriveIcon name="star" size={13} />Starred</span> : null}
+                {filterType !== 'all' ? <span className="filter-chip">{filterType === 'file' ? 'Files' : 'Folders'} <button aria-label="Clear type filter" onClick={() => setFilterType('all')} type="button"><DriveIcon name="close" size={13} /></button></span> : null}
+                <span className="filter-spacer" />
+                <label className="sr-only" htmlFor="sort-items">Sort items</label>
+                <select aria-label="Sort items" className="sort-select" id="sort-items" onChange={(event) => { const [nextKey, nextDirection] = event.target.value.split('-') as [SortKey, 'asc' | 'desc']; setSortKey(nextKey); setSortDirection(nextDirection); }} value={`${sortKey}-${sortDirection}`}>
+                  <option value="name-asc">Name A–Z</option><option value="name-desc">Name Z–A</option><option value="updated-desc">Last modified</option><option value="updated-asc">Oldest modified</option><option value="size-desc">Largest first</option><option value="type-asc">Type</option>
+                </select>
+                <div aria-label="View mode" className="view-toggle">
+                  <button aria-label="List view" className={viewMode === 'list' ? 'view-toggle-active' : ''} onClick={() => setViewMode('list')} type="button"><DriveIcon name="view-list" size={17} /></button>
+                  <button aria-label="Grid view" className={viewMode === 'grid' ? 'view-toggle-active' : ''} onClick={() => setViewMode('grid')} type="button"><DriveIcon name="grid" size={17} /></button>
                 </div>
-              ) : null}
-              {dialog.kind === 'rename' ? (
-                <div className="field-group">
-                  <label htmlFor="dialog-item-name">New name</label>
-                  <input
-                    autoFocus
-                    id="dialog-item-name"
-                    onChange={(event) => setDialogValue(event.target.value)}
-                    required
-                    value={dialogValue}
-                  />
-                </div>
-              ) : null}
-              {dialog.kind === 'move' ? (
-                <div className="field-group">
-                  <label htmlFor="dialog-parent-id">Destination folder ID</label>
-                  <input
-                    autoFocus
-                    id="dialog-parent-id"
-                    onChange={(event) => setDialogValue(event.target.value)}
-                    placeholder="Folder UUID, or blank for My Drive"
-                    value={dialogValue}
-                  />
-                  <p className="field-help">The current folder ID is pre-filled when available.</p>
-                </div>
-              ) : null}
-              {dialogError ? (
-                <p aria-live="polite" className="form-error" role="alert">
-                  {dialogError}
-                </p>
-              ) : null}
-              <div className="dialog-actions">
-                <button className="button button-quiet" onClick={closeDialog} type="button">
-                  Cancel
-                </button>
-                <button
-                  className={dialog.kind === 'confirm' && dialog.action === 'permanent' ? 'button button-danger' : 'button button-primary'}
-                  disabled={busyAction !== null}
-                  type="submit"
-                >
-                  {busyAction
-                    ? 'Working…'
-                    : dialog.kind === 'folder'
-                      ? 'Create folder'
-                      : dialog.kind === 'rename'
-                        ? 'Rename'
-                        : dialog.kind === 'move'
-                          ? 'Move'
-                          : dialog.action === 'trash'
-                            ? 'Move to Trash'
-                            : 'Delete forever'}
-                </button>
               </div>
-            </form>
-          </section>
-        </div>
-      ) : null}
+
+              {filterOpen ? <div className="filter-panel">
+                <div className="filter-group"><label htmlFor="filter-type">Type</label><select id="filter-type" onChange={(event) => setFilterType(event.target.value as FilterType)} value={filterType}><option value="all">All items</option><option value="file">Files only</option><option value="folder">Folders only</option></select></div>
+                <div className="filter-group"><label htmlFor="filter-modified">Modified</label><select id="filter-modified" onChange={(event) => setModifiedFilter(event.target.value as ModifiedFilter)} value={modifiedFilter}><option value="any">Any time</option><option value="today">Today</option><option value="week">This week</option><option value="month">This month</option></select></div>
+                <div className="filter-group"><label htmlFor="filter-location">Location</label><select id="filter-location" onChange={(event) => setLocationFilter(event.target.value as 'all' | 'current')} value={locationFilter}><option value="all">Anywhere in Drive</option><option value="current">Current folder</option></select></div>
+                <div className="filter-group"><label htmlFor="filter-starred">Organization</label><select id="filter-starred" onChange={(event) => setStarredOnly(event.target.value === 'starred')} value={starredOnly ? 'starred' : 'all'}><option value="all">All items</option><option value="starred">Starred only</option></select></div>
+                <div className="filter-group"><span className="sr-only">Clear filters</span><button className="button button-quiet" onClick={clearFilters} type="button">Clear filters</button></div>
+              </div> : null}
+
+              {selectedCount > 0 ? <div className="action-row selection-toolbar">
+                <div className="action-row-left"><p className="selection-count">{selectedCount} selected</p>
+                  {!isTrash ? <><button className="button button-secondary" disabled={busyAction !== null} onClick={() => void runBulkMutation('star')} type="button"><DriveIcon name="star" size={16} />Star</button><button className="button button-secondary" disabled={busyAction !== null} onClick={() => void runBulkMutation('unstar')} type="button">Unstar</button><button className="button button-secondary" disabled={busyAction !== null} onClick={openBulkMoveDialog} type="button"><DriveIcon name="folder" size={16} />Move</button><button className="button button-danger" disabled={busyAction !== null} onClick={() => openBulkConfirmDialog('trash')} type="button"><DriveIcon name="trash" size={16} />Trash</button></> : <><button className="button button-secondary" disabled={busyAction !== null} onClick={() => void runBulkMutation('restore')} type="button">Restore</button><button className="button button-danger" disabled={busyAction !== null} onClick={() => openBulkConfirmDialog('permanent')} type="button">Delete forever</button></>}
+                </div><button className="button button-quiet" onClick={() => setSelectedIds(new Set())} type="button">Clear selection</button>
+              </div> : <div className="action-row"><div className="action-row-left">{!isTrash ? <><input className="sr-only" id="drive-upload" onChange={handleUploadChange} ref={fileInputRef} type="file" /><button className="button button-primary" disabled={busyAction !== null} onClick={() => fileInputRef.current?.click()} type="button"><DriveIcon name="upload" size={16} />{busyAction === 'upload' ? 'Uploading…' : 'Upload file'}</button><button className="button button-secondary" disabled={busyAction !== null} onClick={openFolderDialog} type="button"><DriveIcon name="plus" size={16} />New folder</button></> : <p className="toolbar-hint">Items in Trash can be restored or permanently deleted.</p>}</div>{isSearching ? <p className="toolbar-hint">{activeSearch ? <>Results for <strong>“{activeSearch}”</strong></> : view === 'recent' ? 'Recently modified items' : view === 'starred' ? 'Your starred items' : 'Filtered items'}</p> : null}</div>}
+
+              {statusMessage ? <p aria-live="polite" className="status-message" role="status">{statusMessage}</p> : null}
+              {error ? <p aria-live="assertive" className="form-error page-error" role="alert">{error}</p> : null}
+
+              {viewMode === 'list' ? <div aria-busy={loading} className="table-wrap"><table className="item-table"><caption className="sr-only">{viewTitle(view)} files and folders</caption><thead><tr><th scope="col"><label className="sr-only" htmlFor="select-all">Select all items</label><input aria-label="Select all items" checked={allSelected} className="item-check" id="select-all" onChange={toggleSelectAll} type="checkbox" /></th><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Updated</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>{loading ? <tr><td className="table-message" colSpan={5}>Loading items…</td></tr> : items.length === 0 ? <tr><td className="table-message" colSpan={5}><EmptyState isTrash={isTrash} isSearching={isSearching} /></td></tr> : items.map((item) => <DriveItemRow disabled={busyAction !== null} isSelected={selectedIds.has(item.id)} isTrash={isTrash} item={item} key={item.id} onMove={openMoveDialog} onOpenFolder={openFolder} onPermanentDelete={(candidate) => openConfirmDialog(candidate, 'permanent')} onRename={openRenameDialog} onRestore={handleRestore} onSelect={toggleSelected} onStar={toggleStar} onTrash={(candidate) => openConfirmDialog(candidate, 'trash')} />)}</tbody></table></div> : <div aria-busy={loading} className="grid-wrap">{loading ? <div className="table-message">Loading items…</div> : items.length === 0 ? <div className="table-message"><EmptyState isTrash={isTrash} isSearching={isSearching} /></div> : items.map((item) => <DriveItemCard disabled={busyAction !== null} isSelected={selectedIds.has(item.id)} isTrash={isTrash} item={item} key={item.id} onMove={openMoveDialog} onOpenFolder={openFolder} onPermanentDelete={(candidate) => openConfirmDialog(candidate, 'permanent')} onRename={openRenameDialog} onRestore={handleRestore} onSelect={toggleSelected} onStar={toggleStar} onTrash={(candidate) => openConfirmDialog(candidate, 'trash')} />)}</div>}
+            </section>
+          </div>
+        </main>
+      </div>
+
+      {dialog ? <DriveDialog busyAction={busyAction} dialog={dialog} dialogError={dialogError} dialogValue={dialogValue} onChange={setDialogValue} onClose={closeDialog} onSubmit={handleDialogSubmit} /> : null}
     </div>
   );
+}
+
+type ItemInteractionProps = {
+  disabled: boolean;
+  isSelected: boolean;
+  isTrash: boolean;
+  item: DriveItem;
+  onMove: (item: DriveItem) => void;
+  onOpenFolder: (item: DriveItem) => void;
+  onPermanentDelete: (item: DriveItem) => void;
+  onRename: (item: DriveItem) => void;
+  onRestore: (item: DriveItem) => void;
+  onSelect: (itemId: string) => void;
+  onStar: (item: DriveItem) => void;
+  onTrash: (item: DriveItem) => void;
+};
+
+function ItemActions({ disabled, isTrash, item, onMove, onPermanentDelete, onRename, onRestore, onTrash }: Pick<ItemInteractionProps, 'disabled' | 'isTrash' | 'item' | 'onMove' | 'onPermanentDelete' | 'onRename' | 'onRestore' | 'onTrash'>) {
+  if (isTrash) return <><button className="action-link" disabled={disabled} onClick={() => void onRestore(item)} type="button">Restore</button><button className="action-link action-link-danger" disabled={disabled} onClick={() => onPermanentDelete(item)} type="button">Delete forever</button></>;
+  return <><button className="action-link" disabled={disabled} onClick={() => onRename(item)} type="button">Rename</button><button className="action-link" disabled={disabled} onClick={() => onMove(item)} type="button">Move</button><button className="action-link action-link-danger" disabled={disabled} onClick={() => onTrash(item)} type="button">Trash</button></>;
+}
+
+function ItemGlyph({ item }: { item: DriveItem }) {
+  return <span aria-hidden="true" className={`item-glyph ${item.kind === 'file' ? 'item-glyph-file' : ''}`}><DriveIcon name={item.kind === 'folder' ? 'folder' : 'file'} size={19} /></span>;
+}
+
+function ItemName({ item, onOpenFolder }: { item: DriveItem; onOpenFolder: (item: DriveItem) => void }) {
+  return <div className="item-copy">{item.kind === 'folder' && !item.trashed ? <button className="item-name-link" onClick={() => onOpenFolder(item)} type="button">{item.name}</button> : <span className="item-name-text">{item.name}</span>}<span className="item-subline">{item.kind === 'folder' ? 'Folder' : fileLabel(item)}{item.trashed ? ' · In Trash' : ''}</span></div>;
+}
+
+function DriveItemRow({ disabled, isSelected, isTrash, item, onMove, onOpenFolder, onPermanentDelete, onRename, onRestore, onSelect, onStar, onTrash }: ItemInteractionProps) {
+  return <tr className={isSelected ? 'item-row-selected' : ''}><td><input aria-label={`Select ${item.name}`} checked={isSelected} className="item-check" disabled={disabled} onChange={() => onSelect(item.id)} type="checkbox" /></td><td><div className="item-name-cell"><ItemGlyph item={item} /><ItemName item={item} onOpenFolder={onOpenFolder} /><button aria-label={item.starred ? `Remove ${item.name} from Starred` : `Add ${item.name} to Starred`} className={`star-button ${item.starred ? 'star-button-starred' : ''}`} disabled={disabled || isTrash} onClick={() => void onStar(item)} type="button"><DriveIcon name="star" size={17} /></button></div></td><td>{fileLabel(item)}</td><td><span className="date-cell">{formatUpdatedAt(item.updatedAt)}</span>{item.kind === 'file' ? <span className="size-cell">{formatFileSize(item.size)}</span> : null}</td><td><div aria-label={`Actions for ${item.name}`} className="item-actions"><ItemActions disabled={disabled} isTrash={isTrash} item={item} onMove={onMove} onPermanentDelete={onPermanentDelete} onRename={onRename} onRestore={onRestore} onTrash={onTrash} /></div></td></tr>;
+}
+
+function DriveItemCard({ disabled, isSelected, isTrash, item, onMove, onOpenFolder, onPermanentDelete, onRename, onRestore, onSelect, onStar, onTrash }: ItemInteractionProps) {
+  return <article className={`grid-card ${isSelected ? 'grid-card-selected' : ''}`}><div className="grid-card-top"><ItemGlyph item={item} /><button aria-label={item.starred ? `Remove ${item.name} from Starred` : `Add ${item.name} to Starred`} className={`star-button ${item.starred ? 'star-button-starred' : ''}`} disabled={disabled || isTrash} onClick={() => void onStar(item)} type="button"><DriveIcon name="star" size={18} /></button></div><input aria-label={`Select ${item.name}`} checked={isSelected} className="item-check grid-card-check" disabled={disabled} onChange={() => onSelect(item.id)} type="checkbox" /><div className="grid-card-body"><ItemName item={item} onOpenFolder={onOpenFolder} /></div><div className="grid-card-footer"><DriveIcon name="clock" size={13} />{formatUpdatedAt(item.updatedAt)}{item.kind === 'file' ? ` · ${formatFileSize(item.size)}` : ''}</div><div className="grid-card-actions"><ItemActions disabled={disabled} isTrash={isTrash} item={item} onMove={onMove} onPermanentDelete={onPermanentDelete} onRename={onRename} onRestore={onRestore} onTrash={onTrash} /></div></article>;
+}
+
+function DriveDialog({ busyAction, dialog, dialogError, dialogValue, onChange, onClose, onSubmit }: { busyAction: string | null; dialog: DialogState; dialogError: string | null; dialogValue: string; onChange: (value: string) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+  const isBulk = dialog.kind === 'bulk-move' || dialog.kind === 'bulk-confirm';
+  const title = dialog.kind === 'folder' ? 'Create a folder' : dialog.kind === 'rename' ? 'Rename item' : dialog.kind === 'move' || dialog.kind === 'bulk-move' ? (isBulk ? 'Move selected items' : 'Move item') : dialog.action === 'trash' ? (isBulk ? 'Move selected items to Trash?' : 'Move to Trash?') : (isBulk ? 'Delete selected items permanently?' : 'Delete permanently?');
+  const description = dialog.kind === 'folder' ? 'Create a new folder in the current location.' : dialog.kind === 'rename' ? `Choose a new name for ${dialog.item.name}.` : dialog.kind === 'move' || dialog.kind === 'bulk-move' ? 'Enter a destination folder ID. Leave it blank to move to My Drive.' : dialog.action === 'trash' ? (isBulk ? 'Selected items can be restored from Trash later.' : `${dialog.item.name} can be restored from Trash later.`) : (isBulk ? 'Selected items and their contents will be permanently removed.' : `${dialog.item.name} and its contents will be permanently removed. This cannot be undone.`);
+  return <div className="dialog-backdrop"><section aria-describedby="drive-dialog-description" aria-labelledby="drive-dialog-title" aria-modal="true" className="dialog-card" role="dialog"><div className="dialog-header"><div><p className="eyebrow">Drive action</p><h2 id="drive-dialog-title">{title}</h2></div><button aria-label="Close dialog" className="dialog-close" onClick={onClose} type="button"><DriveIcon name="close" size={21} /></button></div><p className="dialog-description" id="drive-dialog-description">{description}</p><form className="dialog-form" onSubmit={onSubmit}>{dialog.kind === 'folder' ? <div className="field-group"><label htmlFor="dialog-folder-name">Folder name</label><input autoFocus id="dialog-folder-name" onChange={(event) => onChange(event.target.value)} placeholder="New folder" required value={dialogValue} /></div> : null}{dialog.kind === 'rename' ? <div className="field-group"><label htmlFor="dialog-item-name">New name</label><input autoFocus id="dialog-item-name" onChange={(event) => onChange(event.target.value)} required value={dialogValue} /></div> : null}{dialog.kind === 'move' || dialog.kind === 'bulk-move' ? <div className="field-group"><label htmlFor="dialog-parent-id">Destination folder ID</label><input autoFocus id="dialog-parent-id" onChange={(event) => onChange(event.target.value)} placeholder="Folder UUID, or blank for My Drive" value={dialogValue} /><p className="field-help">The current folder ID is pre-filled when available.</p></div> : null}{dialogError ? <p aria-live="polite" className="form-error" role="alert">{dialogError}</p> : null}<div className="dialog-actions"><button className="button button-quiet" onClick={onClose} type="button">Cancel</button><button className={((dialog.kind === 'confirm' || dialog.kind === 'bulk-confirm') && dialog.action === 'permanent') ? 'button button-danger' : 'button button-primary'} disabled={busyAction !== null} type="submit">{busyAction ? 'Working…' : dialog.kind === 'folder' ? 'Create folder' : dialog.kind === 'rename' ? 'Rename' : dialog.kind === 'move' || dialog.kind === 'bulk-move' ? 'Move' : dialog.action === 'trash' ? 'Move to Trash' : 'Delete forever'}</button></div></form></section></div>;
 }
 
 function LoadingScreen({ label }: { label: string }) {
-  return (
-    <main className="loading-page">
-      <div aria-live="polite" className="loading-card" role="status">
-        <span className="loading-spinner" />
-        <span>{label}</span>
-      </div>
-    </main>
-  );
+  return <main className="loading-page"><div aria-live="polite" className="loading-card" role="status"><span className="loading-spinner" /><span>{label}</span></div></main>;
 }
 
 function EmptyState({ isTrash, isSearching }: { isTrash: boolean; isSearching: boolean }) {
-  if (isSearching) {
-    return (
-      <div className="empty-state">
-        <strong>No matching items</strong>
-        <span>Try a different search term.</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="empty-state">
-      <strong>{isTrash ? 'Trash is empty' : 'This folder is empty'}</strong>
-      <span>{isTrash ? 'Deleted items will appear here.' : 'Upload a file or create a folder to get started.'}</span>
-    </div>
-  );
+  if (isSearching) return <div className="empty-state"><DriveIcon name="search" size={30} /><strong>No matching items</strong><span>Try a different search term or clear a filter.</span></div>;
+  return <div className="empty-state"><DriveIcon className="empty-state-icon" name={isTrash ? 'trash' : 'folder'} size={34} /><strong>{isTrash ? 'Trash is empty' : 'This folder is empty'}</strong><span>{isTrash ? 'Deleted items will appear here.' : 'Upload a file or create a folder to get started.'}</span></div>;
 }

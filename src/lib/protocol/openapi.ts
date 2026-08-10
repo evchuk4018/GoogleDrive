@@ -32,9 +32,17 @@ export const openapi = {
     "/api/drive/search": {
       get: {
         parameters: [
-          { name: "q", in: "query", required: true, schema: { type: "string", minLength: 1 } },
+          { name: "q", in: "query", schema: { type: "string", maxLength: 256 } },
           { name: "cursor", in: "query", schema: { type: "string" } },
           { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100 } },
+          { name: "includeTrash", in: "query", schema: { type: "boolean" } },
+          { name: "starred", in: "query", schema: { type: "boolean" } },
+          { name: "kind", in: "query", schema: { type: "string", enum: ["file", "folder"] } },
+          { name: "parentId", in: "query", schema: { type: "string", format: "uuid" } },
+          { name: "modifiedAfter", in: "query", schema: { type: "string", format: "date-time" } },
+          { name: "modifiedBefore", in: "query", schema: { type: "string", format: "date-time" } },
+          { name: "sort", in: "query", schema: { type: "string", enum: ["name", "updatedAt", "size", "kind"] } },
+          { name: "direction", in: "query", schema: { type: "string", enum: ["asc", "desc"] } },
         ],
         responses: { "200": { description: "Matching items" }, "401": { $ref: "#/components/responses/Unauthorized" } },
       },
@@ -87,7 +95,7 @@ export const openapi = {
     schemas: {
       LoginRequest: { type: "object", required: ["token"], properties: { token: { type: "string" } } },
       CreateFolderRequest: { type: "object", required: ["name"], properties: { name: { type: "string", minLength: 1, maxLength: 255 }, parentId: { type: "string", format: "uuid" } } },
-      UpdateItemRequest: { type: "object", properties: { name: { type: "string", minLength: 1, maxLength: 255 }, parentId: { type: "string", format: "uuid" } }, additionalProperties: false },
+      UpdateItemRequest: { type: "object", properties: { name: { type: "string", minLength: 1, maxLength: 255 }, parentId: { anyOf: [{ type: "string", format: "uuid" }, { type: "null" }] }, starred: { type: "boolean" } }, additionalProperties: false },
     },
     responses: { Unauthorized: { description: "Missing or invalid bearer token/session" } },
   },
