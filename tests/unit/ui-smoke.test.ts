@@ -9,4 +9,11 @@ describe("Drive UI render contract", () => {
       expect(source).toContain(label);
     }
   });
+
+  it("leaves the session check with a retry action when the request times out", async () => {
+    const source = await readFile(path.resolve("src/components/drive/drive-browser.tsx"), "utf8");
+    expect(source).toContain("setAuthState((current) => (current === 'checking' ? 'error' : current))");
+    expect(source).toContain("Drive is unavailable");
+    expect(source).toContain("Try again");
+  });
 });

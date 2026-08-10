@@ -10,27 +10,58 @@ export class DriveApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    credentials: 'include',
-  });
+export const DRIVE_READ_TIMEOUT_MS = 10_000;
 
-  const contentType = response.headers.get('content-type') ?? '';
-  const payload: unknown = contentType.includes('application/json')
-    ? await response.json().catch(() => null)
-    : await response.text().catch(() => '');
+export class DriveRequestTimeoutError extends Error {
+  readonly timeoutMs: number;
 
-  if (!response.ok) {
-    const body = payload as DriveApiErrorShape | string | null;
-    const nestedError = typeof body === 'object' && body !== null && typeof body.error === 'object' && body.error !== null
-      ? body.error.message
-      : typeof body === 'object' && body !== null && typeof body.error === 'string' ? body.error : undefined;
-    const message = typeof body === 'string' ? body : body?.message ?? nestedError ?? body?.detail ?? 'The Drive request failed.';
-    throw new DriveApiError(message, response.status);
+  constructor(timeoutMs: number) {
+    super(`Drive did not respond within ${Math.ceil(timeoutMs / 1000)} seconds. Please try again.`);
+    this.name = 'DriveRequestTimeoutError';
+    this.timeoutMs = timeoutMs;
   }
+}
 
-  return payload as T;
+type RequestOptions = RequestInit & { timeoutMs?: number };
+
+async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { timeoutMs, ...init } = options;
+  const controller = timeoutMs === undefined ? undefined : new AbortController();
+  const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
+
+  try {
+    const response = await fetch(path, {
+      ...init,
+      credentials: 'include',
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+
+    const contentType = response.headers.get('content-type') ?? '';
+    const payload: unknown = contentType.includes('application/json')
+      ? await response.json().catch(() => null)
+      : await response.text().catch(() => '');
+
+    if (!response.ok) {
+      const body = payload as DriveApiErrorShape | string | null;
+      const nestedError = typeof body === 'object' && body !== null && typeof body.error === 'object' && body.error !== null
+        ? body.error.message
+        : typeof body === 'object' && body !== null && typeof body.error === 'string' ? body.error : undefined;
+      const message = typeof body === 'string' ? body : body?.message ?? nestedError ?? body?.detail ?? 'The Drive request failed.';
+      throw new DriveApiError(message, response.status);
+    }
+
+    return payload as T;
+  } catch (error) {
+    if (controller?.signal.aborted) {
+      throw new DriveRequestTimeoutError(timeoutMs!);
+    }
+
+    throw error;
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 function jsonRequest<T>(path: string, method: 'PATCH' | 'POST', body: unknown) {
@@ -64,11 +95,12 @@ export function listItems(parentId: string | null, includeTrash = false) {
       parentId: parentId ?? undefined,
       includeTrash: includeTrash ? 'true' : undefined,
     })}`,
+    { timeoutMs: DRIVE_READ_TIMEOUT_MS },
   );
 }
 
 export function searchItems(query: string) {
-  return request<unknown>(`/api/drive/search${queryString({ q: query })}`);
+  return request<unknown>(`/api/drive/search${queryString({ q: query })}`, { timeoutMs: DRIVE_READ_TIMEOUT_MS });
 }
 
 export function createFolder(name: string, parentId: string | null) {

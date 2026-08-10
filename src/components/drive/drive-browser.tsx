@@ -21,7 +21,7 @@ import type { DriveBreadcrumb, DriveItem, DriveView } from './drive-types';
 import { formatFileSize, formatUpdatedAt, getErrorMessage, sortDriveItems } from './drive-utils';
 import { LoginForm } from './login-form';
 
-type AuthState = 'checking' | 'signed-out' | 'signed-in';
+type AuthState = 'checking' | 'signed-out' | 'signed-in' | 'error';
 
 type DialogState =
   | { kind: 'folder' }
@@ -70,6 +70,7 @@ export function DriveBrowser() {
         setError(null);
       } else {
         setError(getErrorMessage(loadError, 'Drive items could not be loaded.'));
+        setAuthState((current) => (current === 'checking' ? 'error' : current));
       }
     } finally {
       setLoading(false);
@@ -314,6 +315,40 @@ export function DriveBrowser() {
           <p className="login-footer">
             <Link href="/login">Open the dedicated sign-in page</Link>
           </p>
+        </div>
+      </main>
+    );
+  }
+
+  if (authState === 'error') {
+    return (
+      <main className="login-page">
+        <div className="login-card">
+          <Link className="brand brand-centered" href="/">
+            <span aria-hidden="true" className="brand-mark">
+              D
+            </span>
+            <span>Drive</span>
+          </Link>
+          <p className="eyebrow">Private storage</p>
+          <h1>Drive is unavailable</h1>
+          <p className="login-intro">Drive could not be reached while checking your session.</p>
+          {error ? (
+            <p aria-live="polite" className="form-error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          <button
+            className="button button-primary button-full"
+            onClick={() => {
+              setAuthState('checking');
+              setError(null);
+              void loadItems();
+            }}
+            type="button"
+          >
+            Try again
+          </button>
         </div>
       </main>
     );
