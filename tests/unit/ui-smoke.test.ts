@@ -8,6 +8,7 @@ describe("Drive UI render contract", () => {
     for (const label of [
       "Upload file",
       "New folder",
+      "Download",
       "Rename",
       "Move",
       "Trash",

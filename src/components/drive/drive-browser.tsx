@@ -612,7 +612,8 @@ function ItemActionButtons({ disabled, isTrash, item, onMove, onPermanentDelete,
 }
 
 function ItemActions(props: ItemActionProps) {
-  return <><div className="item-actions-inline"><ItemActionButtons {...props} /></div><details className="item-actions-menu"><summary aria-label={`Actions for ${props.item.name}`} className="action-menu-trigger"><DriveIcon name="more" size={18} /></summary><div className="action-menu-popover"><ItemActionButtons {...props} /></div></details></>;
+  const downloadHref = drivePublicPath(`/api/drive/items/${encodeURIComponent(props.item.id)}/download`);
+  return <><div className="item-actions-inline"><ItemActionButtons {...props} /></div><details className="item-actions-menu"><summary aria-label={`Actions for ${props.item.name}`} className="action-menu-trigger"><DriveIcon name="more" size={18} /></summary><div className="action-menu-popover">{!props.isTrash && props.item.kind === 'file' ? <a className="action-link" download href={downloadHref}>Download</a> : null}<ItemActionButtons {...props} /></div></details></>;
 }
 
 function ItemGlyph({ item }: { item: DriveItem }) {
