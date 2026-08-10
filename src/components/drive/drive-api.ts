@@ -23,10 +23,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   if (!response.ok) {
     const body = payload as DriveApiErrorShape | string | null;
-    const message =
-      typeof body === 'string'
-        ? body
-        : body?.message ?? body?.error ?? body?.detail ?? 'The Drive request failed.';
+    const nestedError = typeof body === 'object' && body !== null && typeof body.error === 'object' && body.error !== null
+      ? body.error.message
+      : typeof body === 'object' && body !== null && typeof body.error === 'string' ? body.error : undefined;
+    const message = typeof body === 'string' ? body : body?.message ?? nestedError ?? body?.detail ?? 'The Drive request failed.';
     throw new DriveApiError(message, response.status);
   }
 

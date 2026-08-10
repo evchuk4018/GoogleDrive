@@ -18,7 +18,7 @@ export interface DriveBreadcrumb {
 
 export interface DriveApiErrorShape {
   message?: string;
-  error?: string;
+  error?: string | { message?: string };
   detail?: string;
 }
 
