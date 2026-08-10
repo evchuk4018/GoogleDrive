@@ -40,3 +40,9 @@ ssh -o BatchMode=yes -o ConnectTimeout=10 evanh@100.98.43.68 "<command>"
 ```
 
 Service-specific checkouts, deployment files, container names, ports, and data paths vary by application. Inspect the target service's deployment configuration on `homelab` before making changes, and keep each service's data isolated from the others.
+
+### Google Drive deployment
+
+* The Homelab checkout is `/srv/storage/googledrive/app`; deployment configuration is `/srv/storage/googledrive/deployment.env`.
+* Deploy the checked-out `main` branch with `docker/update.sh` from the service checkout. The script guards the storage mount, builds the web image, applies migrations, and restarts the web service.
+* After deployment, verify `docker/compose.sh ps`, `/api/health` through the private Drive URL, and `docker/compose.sh run --rm web npm run db:check`.
