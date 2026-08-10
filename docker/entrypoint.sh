@@ -12,4 +12,5 @@ if (($# > 0)); then
   exec "$@"
 fi
 
+export HOSTNAME="${DRIVE_BIND_HOST:-0.0.0.0}"
 exec node server.js
