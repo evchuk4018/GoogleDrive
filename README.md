@@ -71,7 +71,13 @@ The test suite covers validation, safe object keys, atomic writes, hashes and ET
 
 ## Homelab deployment
 
-The dedicated stack is intended to live at `/srv/storage/googledrive/app`. Set `/srv/storage/googledrive/deployment.env` with `POSTGRES_PASSWORD`, `DATABASE_URL=postgres://googledrive:<password>@postgres:5432/googledrive`, and `DRIVE_API_TOKEN`, then run `docker/update.sh` from the checkout. It guards the mount, builds the image, applies migrations, starts the stack, and reports container health.
+The dedicated stack is intended to live at `/srv/storage/googledrive/app`. On a fresh host, initialize the hard-drive-backed directories once as root, choosing the unprivileged account that runs Docker:
+
+```bash
+sudo DRIVE_OWNER_USER=evanh DRIVE_OWNER_GROUP=evanh ./docker/bootstrap-storage.sh
+```
+
+Set `/srv/storage/googledrive/deployment.env` with `POSTGRES_PASSWORD`, `DATABASE_URL=postgres://googledrive:<password>@postgres:5432/googledrive`, and `DRIVE_API_TOKEN`, then run `docker/update.sh` from the checkout. It guards the mount, builds the image, applies migrations, starts the stack, and reports container health.
 
 After the stack is healthy, add the private path while preserving Wowzer's existing root Serve route:
 
