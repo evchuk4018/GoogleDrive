@@ -617,7 +617,20 @@ function ItemDownloadAction({ isTrash, item }: Pick<ItemActionProps, 'isTrash' |
 }
 
 function ItemActions(props: ItemActionProps) {
-  return <><div className="item-actions-inline"><ItemDownloadAction {...props} /><ItemActionButtons {...props} /></div><details className="item-actions-menu"><summary aria-label={`Actions for ${props.item.name}`} className="action-menu-trigger"><DriveIcon name="more" size={18} /></summary><div className="action-menu-popover"><ItemDownloadAction {...props} /><ItemActionButtons {...props} /></div></details></>;
+  const menuRef = useRef<HTMLDetailsElement>(null);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const menu = menuRef.current;
+      if (!menu) return;
+      if (!(event.target instanceof Node) || !menu.contains(event.target)) menu.open = false;
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, []);
+
+  return <><div className="item-actions-inline"><ItemDownloadAction {...props} /><ItemActionButtons {...props} /></div><details className="item-actions-menu" ref={menuRef}><summary aria-label={`Actions for ${props.item.name}`} className="action-menu-trigger"><DriveIcon name="more" size={18} /></summary><div className="action-menu-popover"><ItemDownloadAction {...props} /><ItemActionButtons {...props} /></div></details></>;
 }
 
 function ItemGlyph({ item }: { item: DriveItem }) {

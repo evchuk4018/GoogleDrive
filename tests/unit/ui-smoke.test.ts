@@ -40,4 +40,12 @@ describe("Drive UI render contract", () => {
     expect(source).toContain("id=\"drive-navigation\"");
     expect(iconSource).toContain('stroke="currentColor"');
   });
+
+  it("closes item action menus when a pointer starts outside them", async () => {
+    const source = await readFile(path.resolve("src/components/drive/drive-browser.tsx"), "utf8");
+
+    expect(source).toContain("document.addEventListener('pointerdown', handlePointerDown)");
+    expect(source).toContain("!menu.contains(event.target)");
+    expect(source).toContain("menu.open = false");
+  });
 });
