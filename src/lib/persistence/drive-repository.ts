@@ -87,6 +87,7 @@ export const DRIVE_SQL = {
     SELECT ${ITEM_COLUMNS}, lower(name) AS sort_key
     FROM drive_items
     WHERE parent_id IS NOT DISTINCT FROM $1::uuid
+      AND id <> '00000000-0000-4000-8000-000000000001'::uuid
       AND ($2::boolean OR trashed_at IS NULL)
       AND (
         $3::text IS NULL
@@ -99,6 +100,7 @@ export const DRIVE_SQL = {
     SELECT ${ITEM_COLUMNS}, lower(name) AS sort_key
     FROM drive_items
     WHERE ($1::boolean OR trashed_at IS NULL)
+      AND id <> '00000000-0000-4000-8000-000000000001'::uuid
       AND (
         $2::text = ''
         OR lower(name) LIKE '%' || lower($2::text) || '%' ESCAPE '\\'
