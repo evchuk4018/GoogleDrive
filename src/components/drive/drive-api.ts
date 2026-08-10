@@ -1,4 +1,5 @@
 import type { DriveApiErrorShape, DriveItem } from './drive-types';
+import { drivePublicPath } from '@/lib/config/drive-public-path';
 
 export class DriveApiError extends Error {
   readonly status: number;
@@ -10,15 +11,22 @@ export class DriveApiError extends Error {
   }
 }
 
-export const DRIVE_READ_TIMEOUT_MS = 10_000;
+export const DRIVE_READ_TIMEOUT_MS = 3_000;
 
 export class DriveRequestTimeoutError extends Error {
   readonly timeoutMs: number;
 
   constructor(timeoutMs: number) {
-    super(`Drive did not respond within ${Math.ceil(timeoutMs / 1000)} seconds. Please try again.`);
+    super(`Drive did not respond within ${Math.ceil(timeoutMs / 1000)} seconds. Check your connection and try again.`);
     this.name = 'DriveRequestTimeoutError';
     this.timeoutMs = timeoutMs;
+  }
+}
+
+export class DriveNetworkError extends Error {
+  constructor() {
+    super('Drive could not be reached. Check your Tailscale connection and try again.');
+    this.name = 'DriveNetworkError';
   }
 }
 
@@ -30,7 +38,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
 
   try {
-    const response = await fetch(path, {
+    const response = await fetch(drivePublicPath(path), {
       ...init,
       credentials: 'include',
       ...(controller ? { signal: controller.signal } : {}),
@@ -46,7 +54,17 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       const nestedError = typeof body === 'object' && body !== null && typeof body.error === 'object' && body.error !== null
         ? body.error.message
         : typeof body === 'object' && body !== null && typeof body.error === 'string' ? body.error : undefined;
-      const message = typeof body === 'string' ? body : body?.message ?? nestedError ?? body?.detail ?? 'The Drive request failed.';
+      const textMessage = typeof body === 'string' && !contentType.includes('text/html')
+        ? body.trim() || undefined
+        : undefined;
+      const fallbackMessage = response.status === 404
+        ? 'The Drive endpoint was not found. Check the configured Drive URL.'
+        : response.status >= 500
+          ? `Drive returned a server error (${response.status}). Please try again.`
+          : `The Drive request failed (${response.status}).`;
+      const message = textMessage ?? (typeof body === 'object' && body !== null
+        ? body.message ?? nestedError ?? body.detail
+        : undefined) ?? fallbackMessage;
       throw new DriveApiError(message, response.status);
     }
 
@@ -54,6 +72,10 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   } catch (error) {
     if (controller?.signal.aborted) {
       throw new DriveRequestTimeoutError(timeoutMs!);
+    }
+
+    if (error instanceof TypeError) {
+      throw new DriveNetworkError();
     }
 
     throw error;

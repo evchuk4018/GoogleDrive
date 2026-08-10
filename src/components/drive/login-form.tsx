@@ -1,18 +1,17 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 
 import { login } from './drive-api';
 import { getErrorMessage } from './drive-utils';
+import { drivePublicPath } from '@/lib/config/drive-public-path';
 
 interface LoginFormProps {
   onSuccess?: () => void;
 }
 
 export function LoginForm({ onSuccess }: LoginFormProps) {
-  const router = useRouter();
   const [token, setToken] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -36,7 +35,7 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
       if (onSuccess) {
         onSuccess();
       } else {
-        router.replace('/');
+        window.location.assign(drivePublicPath('/'));
       }
     } catch (submitError) {
       setError(getErrorMessage(submitError, 'The token could not be verified.'));

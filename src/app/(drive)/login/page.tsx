@@ -1,17 +1,16 @@
-import Link from 'next/link';
-
 import { LoginForm } from '../../../components/drive/login-form';
+import { drivePublicPath } from '../../../lib/config/drive-public-path';
 
 export default function LoginPage() {
   return (
     <main className="login-page">
       <div className="login-card">
-        <Link className="brand brand-centered" href="/">
+        <a className="brand brand-centered" href={drivePublicPath('/')}>
           <span aria-hidden="true" className="brand-mark">
             D
           </span>
           <span>Drive</span>
-        </Link>
+        </a>
         <p className="eyebrow">Private storage</p>
         <h1>Sign in to Drive</h1>
         <p className="login-intro">
@@ -20,7 +19,7 @@ export default function LoginPage() {
         </p>
         <LoginForm />
         <p className="login-footer">
-          <Link href="/">Return to Drive</Link>
+          <a href={drivePublicPath('/')}>Return to Drive</a>
         </p>
       </div>
     </main>

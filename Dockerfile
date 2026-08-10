@@ -5,6 +5,8 @@ RUN npm install
 
 FROM node:22-bookworm-slim AS builder
 WORKDIR /app
+ARG NEXT_PUBLIC_DRIVE_BASE_PATH=/drive
+ENV NEXT_PUBLIC_DRIVE_BASE_PATH=${NEXT_PUBLIC_DRIVE_BASE_PATH}
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -12,7 +14,9 @@ RUN npm run typecheck && npm run build
 
 FROM node:22-bookworm-slim AS runner
 WORKDIR /app
+ARG NEXT_PUBLIC_DRIVE_BASE_PATH=/drive
 ENV NODE_ENV=production
+ENV NEXT_PUBLIC_DRIVE_BASE_PATH=${NEXT_PUBLIC_DRIVE_BASE_PATH}
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/node_modules ./node_modules

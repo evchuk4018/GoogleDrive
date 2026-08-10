@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
 
@@ -20,6 +19,7 @@ import {
 import type { DriveBreadcrumb, DriveItem, DriveView } from './drive-types';
 import { formatFileSize, formatUpdatedAt, getErrorMessage, sortDriveItems } from './drive-utils';
 import { LoginForm } from './login-form';
+import { drivePublicPath } from '@/lib/config/drive-public-path';
 
 type AuthState = 'checking' | 'signed-out' | 'signed-in' | 'error';
 
@@ -295,12 +295,12 @@ export function DriveBrowser() {
     return (
       <main className="login-page">
         <div className="login-card">
-          <Link className="brand brand-centered" href="/">
+          <a className="brand brand-centered" href={drivePublicPath('/')}>
             <span aria-hidden="true" className="brand-mark">
               D
             </span>
             <span>Drive</span>
-          </Link>
+          </a>
           <p className="eyebrow">Private storage</p>
           <h1>Sign in to Drive</h1>
           <p className="login-intro">
@@ -313,7 +313,7 @@ export function DriveBrowser() {
           ) : null}
           <LoginForm onSuccess={handleAuthSuccess} />
           <p className="login-footer">
-            <Link href="/login">Open the dedicated sign-in page</Link>
+            <a href={drivePublicPath('/login')}>Open the dedicated sign-in page</a>
           </p>
         </div>
       </main>
@@ -324,12 +324,12 @@ export function DriveBrowser() {
     return (
       <main className="login-page">
         <div className="login-card">
-          <Link className="brand brand-centered" href="/">
+          <a className="brand brand-centered" href={drivePublicPath('/')}>
             <span aria-hidden="true" className="brand-mark">
               D
             </span>
             <span>Drive</span>
-          </Link>
+          </a>
           <p className="eyebrow">Private storage</p>
           <h1>Drive is unavailable</h1>
           <p className="login-intro">Drive could not be reached while checking your session.</p>
@@ -359,12 +359,12 @@ export function DriveBrowser() {
   return (
     <div className="drive-app">
       <header className="drive-header">
-        <Link className="brand" href="/">
+        <a className="brand" href={drivePublicPath('/')}>
           <span aria-hidden="true" className="brand-mark">
             D
           </span>
           <span>Drive</span>
-        </Link>
+        </a>
         <nav aria-label="Drive views" className="view-nav">
           <button
             className={view === 'drive' ? 'view-tab view-tab-active' : 'view-tab'}
@@ -384,9 +384,9 @@ export function DriveBrowser() {
         <div className="header-meta">
           <span className="session-dot" />
           <span>Session active</span>
-          <Link className="header-link" href="/login">
+          <a className="header-link" href={drivePublicPath('/login')}>
             Sign in again
-          </Link>
+          </a>
         </div>
       </header>
 

@@ -10,6 +10,8 @@ A single-owner, self-hosted file browser and MCP server. Metadata lives in Postg
 
 The application container applies pending migrations before starting. Database and application ports are not publicly published: PostgreSQL is private to Compose and the web service binds only to `127.0.0.1:3080`.
 
+The production image sets `NEXT_PUBLIC_DRIVE_BASE_PATH=/drive` so browser assets, navigation, and API calls stay under the Tailscale Serve mount. Leave it empty for direct local development at `/`.
+
 ## API
 
 REST and MCP requests use `Authorization: Bearer $DRIVE_API_TOKEN`. The browser login accepts the same token and exchanges it for a short-lived HttpOnly session cookie.
