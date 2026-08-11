@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 
-import { isRequestAuthorized } from "@/lib/auth/auth";
 import { drivePublicPath } from "@/lib/config/drive-public-path";
 import {
   type SharedUploadFile,
@@ -9,7 +8,6 @@ import {
 } from "@/lib/domain/share-upload";
 
 export type ShareTargetDependencies = {
-  isAuthorized?: (request: Request) => boolean | Promise<boolean>;
   uploadFiles?: (files: readonly SharedUploadFile[]) => Promise<SharedUploadResult>;
 };
 
@@ -35,14 +33,8 @@ export async function handleShareTarget(
   request: Request,
   dependencies: ShareTargetDependencies = {},
 ): Promise<NextResponse> {
-  const authorized = dependencies.isAuthorized
-    ? await dependencies.isAuthorized(request)
-    : await isRequestAuthorized(request);
-
-  if (!authorized) return redirectToDrive(request, { share: "signin" });
-
   try {
-    const files = sharedFiles(await request.formData());
+    const files = request.body ? sharedFiles(await request.formData()) : [];
     if (files.length === 0) return redirectToDrive(request, { shared: "empty" });
 
     const result = await (dependencies.uploadFiles ?? uploadSharedFiles)(files);

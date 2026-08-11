@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { isRequestAuthorized } from "@/lib/auth/auth";
 import { DriveError } from "@/lib/domain/types";
 import { isDriveDomainError } from "@/lib/domain/errors";
 
@@ -7,11 +6,6 @@ export function errorResponse(error: unknown): NextResponse {
   if (error instanceof DriveError || isDriveDomainError(error)) return NextResponse.json({ error: { code: error.code, message: error.message } }, { status: error.status });
   console.error(error);
   return NextResponse.json({ error: { code: "INTERNAL_ERROR", message: "An unexpected server error occurred" } }, { status: 500 });
-}
-
-export async function requireAuth(request: Request, bearerOnly = false): Promise<NextResponse | null> {
-  if (await isRequestAuthorized(request, !bearerOnly)) return null;
-  return NextResponse.json({ error: { code: "UNAUTHORIZED", message: "Authentication required" } }, { status: 401, headers: { "WWW-Authenticate": "Bearer" } });
 }
 
 export async function jsonBody(request: Request): Promise<Record<string, unknown>> {

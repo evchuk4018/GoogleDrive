@@ -1,14 +1,13 @@
 import { NextResponse } from "next/server";
 import { getDriveService } from "@/lib/domain/drive-service";
 import { DriveError } from "@/lib/domain/types";
-import { errorResponse, requireAuth } from "@/lib/http/route-utils";
+import { errorResponse } from "@/lib/http/route-utils";
 import { serializeItem } from "@/lib/http/drive-serialization";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
-  const denied = await requireAuth(request); if (denied) return denied;
   try {
     if (!request.body) throw new DriveError("EMPTY_UPLOAD", "Upload body is empty", 400);
     const name = request.headers.get("x-filename");

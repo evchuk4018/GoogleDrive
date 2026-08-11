@@ -1,6 +1,6 @@
 import { openapi } from "@/lib/protocol/openapi";
 
-const required = ["/api/health", "/api/auth/login", "/api/drive/items", "/api/drive/folders", "/api/drive/upload", "/api/drive/search", "/drive/mcp"];
+const required = ["/api/health", "/api/drive/items", "/api/drive/folders", "/api/drive/upload", "/api/drive/search", "/drive/mcp"];
 for (const path of required) {
   if (!(path in openapi.paths)) throw new Error(`OpenAPI is missing ${path}`);
 }

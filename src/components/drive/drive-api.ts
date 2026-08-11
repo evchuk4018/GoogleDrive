@@ -40,7 +40,6 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   try {
     const response = await fetch(drivePublicPath(path), {
       ...init,
-      credentials: 'include',
       ...(controller ? { signal: controller.signal } : {}),
     });
 
@@ -105,10 +104,6 @@ function queryString(values: Record<string, string | number | boolean | undefine
 
   const query = params.toString();
   return query ? `?${query}` : '';
-}
-
-export function login(token: string) {
-  return jsonRequest<unknown>('/api/auth/login', 'POST', { token });
 }
 
 export function listItems(parentId: string | null, includeTrash = false, options: DriveListOptions = {}) {

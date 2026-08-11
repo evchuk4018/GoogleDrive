@@ -28,9 +28,8 @@ describe("Drive UI render contract", () => {
     }
   });
 
-  it("leaves the session check with a retry action when the request times out", async () => {
+  it("keeps a retry action when Drive is unavailable", async () => {
     const source = await readFile(path.resolve("src/components/drive/drive-browser.tsx"), "utf8");
-    expect(source).toContain("setAuthState((current) => (current === 'checking' ? 'error' : current))");
     expect(source).toContain("Drive is unavailable");
     expect(source).toContain("Try again");
   });
@@ -53,13 +52,12 @@ describe("Drive UI render contract", () => {
     expect(source).toContain("menu.open = false");
   });
 
-  it("provides authenticated inline and text preview endpoints", async () => {
+  it("provides inline and text preview endpoints", async () => {
     const previewRoute = await readFile(path.resolve("src/app/api/drive/items/[id]/preview/route.ts"), "utf8");
     const textRoute = await readFile(path.resolve("src/app/api/drive/items/[id]/preview-text/route.ts"), "utf8");
 
     expect(previewRoute).toContain('"Content-Disposition": "inline"');
     expect(previewRoute).toContain('"X-Content-Type-Options": "nosniff"');
-    expect(previewRoute).toContain("requireAuth(request)");
     expect(textRoute).toContain('"Content-Type": "text/plain; charset=utf-8"');
     expect(textRoute).toContain("readText");
   });
@@ -69,7 +67,6 @@ describe("Drive UI render contract", () => {
 
     expect(source).toContain("window.matchMedia('(display-mode: standalone)').matches");
     expect(source).toContain("event.preventDefault()");
-    expect(source).toContain("credentials: 'include'");
     expect(source).toContain("typeof navigator.canShare !== 'function'");
     expect(source).toContain("navigator.share({ files: [file], title: item.name })");
     expect(source).toContain("NotAllowedError");

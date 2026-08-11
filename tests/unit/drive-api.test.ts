@@ -30,7 +30,7 @@ describe("Drive API request timeouts", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/drive/items",
-      expect.objectContaining({ credentials: "include", signal: expect.any(AbortSignal) }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 
@@ -80,7 +80,7 @@ describe("Drive API request timeouts", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/drive/search?q=report&cursor=next-page&limit=25&starred=true&kind=file&parentId=root&modifiedAfter=2026-08-01T00%3A00%3A00.000Z&sort=updatedAt&direction=desc",
-      expect.objectContaining({ credentials: "include", signal: expect.any(AbortSignal) }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 

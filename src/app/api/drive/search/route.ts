@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDriveService } from "@/lib/domain/drive-service";
 import { ValidationError } from "@/lib/domain/errors";
-import { errorResponse, optionalLimit, requireAuth } from "@/lib/http/route-utils";
+import { errorResponse, optionalLimit } from "@/lib/http/route-utils";
 import { serializePage } from "@/lib/http/drive-serialization";
 import type { ItemKind, SearchDirection, SearchSort } from "@/lib/domain/types";
 
@@ -40,7 +40,6 @@ function optionalDirection(value: string | null): SearchDirection | undefined {
 }
 
 export async function GET(request: Request) {
-  const denied = await requireAuth(request); if (denied) return denied;
   try {
     const url = new URL(request.url);
     const q = url.searchParams.get("q") ?? url.searchParams.get("query") ?? "";

@@ -50,19 +50,15 @@ describe("configuration and item validation", () => {
   it("exposes stable environment and root-folder configuration", () => {
     const config = getDriveConfig({
       DATABASE_URL: "postgres://drive",
-      DRIVE_API_TOKEN: "secret",
       DRIVE_STORAGE_ROOT: "C:/drive-data",
       DRIVE_MAX_UPLOAD_BYTES: "4096",
       DRIVE_MCP_MAX_READ_BYTES: "128",
-      DRIVE_SESSION_TTL_SECONDS: "900",
       ROOT_FOLDER_ID,
     });
 
     expect(config.DATABASE_URL).toBe("postgres://drive");
-    expect(config.DRIVE_API_TOKEN).toBe("secret");
     expect(config.DRIVE_MAX_UPLOAD_BYTES).toBe(4096);
     expect(config.DRIVE_MCP_MAX_READ_BYTES).toBe(128);
-    expect(config.DRIVE_SESSION_TTL_SECONDS).toBe(900);
     expect(config.ROOT_FOLDER_ID).toBe(ROOT_FOLDER_ID);
     expect(config.databaseUrl).toBe(config.DATABASE_URL);
   });

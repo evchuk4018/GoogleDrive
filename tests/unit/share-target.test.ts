@@ -64,7 +64,6 @@ describe("share target route", () => {
     const response = await handleShareTarget(
       new Request("https://drive.test/share-target", { method: "POST", body: form }),
       {
-        isAuthorized: () => true,
         uploadFiles: async (files) => {
           received = [...files];
           return { uploaded: 2, failed: 0 };
@@ -80,13 +79,13 @@ describe("share target route", () => {
     expect(response.headers.get("location")).toBe("https://drive.test/?shared=success&uploaded=2&failed=0");
   });
 
-  it("redirects an unauthenticated share back to Drive with a sign-in notice", async () => {
+  it("accepts shared uploads without an authentication check", async () => {
     const response = await handleShareTarget(
       new Request("https://drive.test/share-target", { method: "POST" }),
-      { isAuthorized: () => false },
+      { uploadFiles: async () => ({ uploaded: 0, failed: 0 }) },
     );
 
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe("https://drive.test/?share=signin");
+    expect(response.headers.get("location")).toBe("https://drive.test/?shared=empty");
   });
 });

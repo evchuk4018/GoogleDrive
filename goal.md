@@ -7,10 +7,9 @@ Build a standalone Next.js/TypeScript service in `C:\Users\erhol\GoogleDrive` wi
 
 - PostgreSQL metadata storage.
 - Atomic local-disk file storage under `/srv/storage/googledrive`.
-- Basic authenticated file-browser UI.
+- Basic file-browser UI.
 - REST API with OpenAPI documentation.
 - Streamable HTTP MCP endpoint for Wowzer Bowser.
-- Single-owner bearer-token authentication with token-backed browser sessions.
 
 Wowzer already supports remote MCP servers, so no Wowzer code changes should be required.
 
@@ -26,10 +25,10 @@ Wowzer already supports remote MCP servers, so no Wowzer code changes should be 
   - Configurable upload limits.
 - Add hierarchical folders, filename search, rename, move, trash, restore, recursive permanent deletion, and duplicate-name protection.
 - Use conditional overwrites: stale `If-Match`/ETag writes return `409` without changing the newer file.
-- Add REST endpoints for authentication, listing/search, folder creation, streaming upload/download, metadata, rename/move, trash, restore, and permanent deletion.
+- Add REST endpoints for listing/search, folder creation, streaming upload/download, metadata, rename/move, trash, restore, and permanent deletion.
 - Add `/openapi.json` and curl examples to the README.
-- Add a minimal UI with login, breadcrumbs, folder navigation, upload, create-folder, rename, move, search, trash, restore, and delete actions.
-- Protect REST and MCP with `Authorization: Bearer <DRIVE_API_TOKEN>`. The UI login accepts the same token and creates a short-lived HttpOnly session cookie.
+- Add a minimal UI with breadcrumbs, folder navigation, upload, create-folder, rename, move, search, trash, restore, and delete actions.
+- Leave REST and MCP authentication to the private network boundary rather than enforcing application login or tokens.
 
 ### MCP interface
 
@@ -49,7 +48,7 @@ Agent-facing tools:
 - `drive_restore_item`
 - `drive_delete_permanently`
 
-Read tools return bounded metadata or UTF-8 text. Small text/base64 writes are supported through MCP; large binary transfers use the authenticated REST upload/download endpoints. Tool names and descriptions will preserve Wowzer’s read/write/destructive approval classification.
+Read tools return bounded metadata or UTF-8 text. Small text/base64 writes are supported through MCP; large binary transfers use the REST upload/download endpoints. Tool names and descriptions will preserve Wowzer’s read/write/destructive approval classification.
 
 Expose the service externally through the existing private Tailscale Serve endpoint:
 
@@ -62,8 +61,8 @@ The existing Wowzer route at `/` must remain unchanged.
 ## Test and Acceptance Criteria
 
 - Unit tests for object-key safety, atomic writes, hashes, ETags, upload limits, duplicate names, folder validation, recursive trash/restore, and permanent deletion.
-- API tests for authentication, folder/file lifecycle, streaming bytes, search, pagination, ETag conflicts, and safe error responses.
-- MCP tests for initialization, tool discovery, tool calls, malformed JSON-RPC, bearer authentication, and structured results.
+- API tests for folder/file lifecycle, streaming bytes, search, pagination, ETag conflicts, and safe error responses.
+- MCP tests for initialization, tool discovery, tool calls, malformed JSON-RPC, and structured results.
 - UI/render tests without browser or screenshot verification.
 - Compose smoke tests verifying:
   - Database migrations apply cleanly.

@@ -3,20 +3,12 @@ export const openapi = {
   info: {
     title: "Local Google Drive API",
     version: "1.0.0",
-    description: "Single-owner, local-disk Google Drive compatible file service.",
+    description: "Local-disk Google Drive compatible file service.",
   },
   servers: [{ url: "/" }],
-  security: [{ bearerAuth: [] }],
   paths: {
     "/api/health": {
       get: { security: [], responses: { "200": { description: "Service and database readiness" } } },
-    },
-    "/api/auth/login": {
-      post: {
-        security: [],
-        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/LoginRequest" } } } },
-        responses: { "200": { description: "Authenticated session" }, "401": { $ref: "#/components/responses/Unauthorized" } },
-      },
     },
     "/api/drive/items": {
       get: {
@@ -26,7 +18,7 @@ export const openapi = {
           { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100 } },
           { name: "includeTrash", in: "query", schema: { type: "boolean" } },
         ],
-        responses: { "200": { description: "Items" }, "401": { $ref: "#/components/responses/Unauthorized" } },
+        responses: { "200": { description: "Items" } },
       },
     },
     "/api/drive/search": {
@@ -44,7 +36,7 @@ export const openapi = {
           { name: "sort", in: "query", schema: { type: "string", enum: ["name", "updatedAt", "size", "kind"] } },
           { name: "direction", in: "query", schema: { type: "string", enum: ["asc", "desc"] } },
         ],
-        responses: { "200": { description: "Matching items" }, "401": { $ref: "#/components/responses/Unauthorized" } },
+        responses: { "200": { description: "Matching items" } },
       },
     },
     "/api/drive/folders": {
@@ -96,13 +88,10 @@ export const openapi = {
     },
   },
   components: {
-    securitySchemes: { bearerAuth: { type: "http", scheme: "bearer" } },
     parameters: { ItemId: { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } } },
     schemas: {
-      LoginRequest: { type: "object", required: ["token"], properties: { token: { type: "string" } } },
       CreateFolderRequest: { type: "object", required: ["name"], properties: { name: { type: "string", minLength: 1, maxLength: 255 }, parentId: { type: "string", format: "uuid" } } },
       UpdateItemRequest: { type: "object", properties: { name: { type: "string", minLength: 1, maxLength: 255 }, parentId: { anyOf: [{ type: "string", format: "uuid" }, { type: "null" }] }, starred: { type: "boolean" } }, additionalProperties: false },
     },
-    responses: { Unauthorized: { description: "Missing or invalid bearer token/session" } },
   },
 } as const;

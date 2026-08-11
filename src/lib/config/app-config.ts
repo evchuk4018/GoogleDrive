@@ -15,22 +15,18 @@ export type DriveEnvironment = Readonly<Record<string, string | undefined>>;
  */
 export type DriveConfig = {
   DATABASE_URL: string;
-  DRIVE_API_TOKEN: string;
   DRIVE_STORAGE_ROOT: string;
   DRIVE_MAX_UPLOAD_BYTES: number;
   DRIVE_MAX_MCP_WRITE_BYTES: number;
   DRIVE_MCP_MAX_READ_BYTES: number;
-  DRIVE_SESSION_TTL_SECONDS: number;
   DRIVE_DB_POOL_MAX: number;
   ROOT_FOLDER_ID: string;
 
   databaseUrl: string;
-  apiToken: string;
   storageRoot: string;
   maxUploadBytes: number;
   maxMcpWriteBytes: number;
   maxMcpReadBytes: number;
-  sessionTtlSeconds: number;
   dbPoolMax: number;
   rootFolderId: string;
 };
@@ -64,7 +60,6 @@ function rootFolderId(environment: DriveEnvironment): string {
  */
 export function getDriveConfig(environment: DriveEnvironment = process.env): DriveConfig {
   const databaseUrl = requiredString(environment, "DATABASE_URL");
-  const apiToken = requiredString(environment, "DRIVE_API_TOKEN");
   const storageRoot = path.resolve(
     environment.DRIVE_STORAGE_ROOT?.trim() || "/srv/storage/googledrive/files",
   );
@@ -83,32 +78,23 @@ export function getDriveConfig(environment: DriveEnvironment = process.env): Dri
     "DRIVE_MCP_MAX_READ_BYTES",
     positiveInt(environment, "DRIVE_MAX_READ_BYTES", 256 * 1024),
   );
-  const sessionTtlSeconds = positiveInt(
-    environment,
-    "DRIVE_SESSION_TTL_SECONDS",
-    8 * 60 * 60,
-  );
   const dbPoolMax = positiveInt(environment, "DRIVE_DB_POOL_MAX", 10);
   const configuredRootFolderId = rootFolderId(environment);
 
   return {
     DATABASE_URL: databaseUrl,
-    DRIVE_API_TOKEN: apiToken,
     DRIVE_STORAGE_ROOT: storageRoot,
     DRIVE_MAX_UPLOAD_BYTES: maxUploadBytes,
     DRIVE_MAX_MCP_WRITE_BYTES: maxMcpWriteBytes,
     DRIVE_MCP_MAX_READ_BYTES: maxMcpReadBytes,
-    DRIVE_SESSION_TTL_SECONDS: sessionTtlSeconds,
     DRIVE_DB_POOL_MAX: dbPoolMax,
     ROOT_FOLDER_ID: configuredRootFolderId,
 
     databaseUrl,
-    apiToken,
     storageRoot,
     maxUploadBytes,
     maxMcpWriteBytes,
     maxMcpReadBytes,
-    sessionTtlSeconds,
     dbPoolMax,
     rootFolderId: configuredRootFolderId,
   };

@@ -5,7 +5,6 @@ import type { ChangeEvent, FormEvent, MouseEvent as ReactMouseEvent } from 'reac
 
 import {
   createFolder,
-  DriveApiError,
   listItems,
   moveItem,
   normalizeDriveItems,
@@ -21,10 +20,8 @@ import {
 import type { DriveBreadcrumb, DriveItem } from './drive-types';
 import { DriveIcon } from './drive-icons';
 import { formatFileSize, formatUpdatedAt, getErrorMessage } from './drive-utils';
-import { LoginForm } from './login-form';
 import { drivePublicPath } from '@/lib/config/drive-public-path';
 
-type AuthState = 'checking' | 'signed-out' | 'signed-in' | 'error';
 type BrowserView = 'drive' | 'recent' | 'starred' | 'trash';
 type ViewMode = 'list' | 'grid';
 type FilterType = 'all' | 'folder' | 'file';
@@ -44,10 +41,6 @@ type PreviewState = { item: DriveItem; text: string | null; error: string | null
 
 function isDriveFile(item: DriveItem): item is DriveFileItem {
   return item.kind === 'file';
-}
-
-function isAuthError(error: unknown) {
-  return error instanceof DriveApiError && (error.status === 401 || error.status === 403);
 }
 
 function initialBreadcrumb(view: BrowserView): DriveBreadcrumb[] {
@@ -91,7 +84,7 @@ function sortItems(items: DriveItem[], sortKey: SortKey, direction: 'asc' | 'des
 
 export function DriveBrowser() {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [authState, setAuthState] = useState<AuthState>('checking');
+  const hasLoadedRef = useRef(false);
   const [view, setView] = useState<BrowserView>('drive');
   const [parentId, setParentId] = useState<string | null>(null);
   const [breadcrumbs, setBreadcrumbs] = useState<DriveBreadcrumb[]>(initialBreadcrumb('drive'));
@@ -114,6 +107,7 @@ export function DriveBrowser() {
   const [dialogValue, setDialogValue] = useState('');
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
   const [shareNotice, setShareNotice] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
@@ -143,16 +137,12 @@ export function DriveBrowser() {
           })
         : await listItems(parentId, isTrash);
       setItems(sortItems(normalizeDriveItems(payload), sortKey, sortDirection));
-      setAuthState('signed-in');
+      hasLoadedRef.current = true;
+      setUnavailable(false);
       setError(null);
     } catch (loadError) {
-      if (isAuthError(loadError)) {
-        setAuthState('signed-out');
-        setError(null);
-      } else {
-        setError(getErrorMessage(loadError, 'Drive items could not be loaded.'));
-        setAuthState((current) => (current === 'checking' ? 'error' : current));
-      }
+      setError(getErrorMessage(loadError, 'Drive items could not be loaded.'));
+      if (!hasLoadedRef.current) setUnavailable(true);
     } finally {
       setLoading(false);
     }
@@ -164,14 +154,11 @@ export function DriveBrowser() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const shareState = params.get('share');
     const sharedState = params.get('shared');
     const uploaded = Number(params.get('uploaded')) || 0;
     const failed = Number(params.get('failed')) || 0;
 
-    if (shareState === 'signin') {
-      setShareNotice('Sign in before sharing files with Drive.');
-    } else if (sharedState === 'success') {
+    if (sharedState === 'success') {
       setStatusMessage(`${uploaded} ${uploaded === 1 ? 'file' : 'files'} uploaded from Share.`);
     } else if (sharedState === 'partial') {
       setStatusMessage(`${uploaded} ${uploaded === 1 ? 'file' : 'files'} uploaded from Share.`);
@@ -182,7 +169,7 @@ export function DriveBrowser() {
       setShareNotice('Drive could not upload the shared files. Try again.');
     }
 
-    if (shareState || sharedState) {
+    if (sharedState) {
       window.history.replaceState(null, document.title, `${window.location.pathname}${window.location.hash}`);
     }
   }, []);
@@ -206,14 +193,6 @@ export function DriveBrowser() {
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
   }, [preview]);
-
-  function handleAuthSuccess() {
-    setAuthState('signed-in');
-    setError(null);
-    setShareNotice(null);
-    setStatusMessage('Signed in successfully.');
-    void loadItems();
-  }
 
   function resetSearch() {
     setSearchTerm('');
@@ -332,12 +311,7 @@ export function DriveBrowser() {
   }
 
   function handleMutationError(mutationError: unknown) {
-    if (isAuthError(mutationError)) {
-      setAuthState('signed-out');
-      setError('Your Drive session expired. Sign in again to continue.');
-    } else {
-      setError(getErrorMessage(mutationError));
-    }
+    setError(getErrorMessage(mutationError));
   }
 
   async function handleUploadChange(event: ChangeEvent<HTMLInputElement>) {
@@ -350,22 +324,17 @@ export function DriveBrowser() {
     setStatusMessage(null);
     let uploaded = 0;
     let failed = 0;
-    let firstError: unknown;
     try {
       for (const file of files) {
         try {
           await uploadFile(file, parentId);
           uploaded += 1;
-        } catch (uploadError) {
+        } catch {
           failed += 1;
-          firstError ??= uploadError;
-          if (isAuthError(uploadError)) break;
         }
       }
 
-      if (firstError && isAuthError(firstError)) {
-        handleMutationError(firstError);
-      } else if (failed > 0) {
+      if (failed > 0) {
         if (uploaded > 0) setStatusMessage(`${uploaded} ${uploaded === 1 ? 'file' : 'files'} uploaded.`);
         setError(`${failed} ${failed === 1 ? 'file could not' : 'files could'} be uploaded.`);
       } else {
@@ -481,34 +450,18 @@ export function DriveBrowser() {
     }
   }
 
-  if (authState === 'checking') return <LoadingScreen label="Checking your Drive session…" />;
+  if (!hasLoadedRef.current && loading) return <LoadingScreen label="Loading Drive…" />;
 
-  if (authState === 'signed-out') {
+  if (unavailable) {
     return (
-      <main className="login-page">
-        <div className="login-card">
-          <a className="brand brand-centered" href={drivePublicPath('/')}><span aria-hidden="true" className="brand-mark">D</span><span>Drive</span></a>
-          <p className="eyebrow">Private storage</p>
-          <h1>Sign in to Drive</h1>
-          <p className="login-intro">Enter the API token for this private Drive service to browse your files.</p>
-          {(error ?? shareNotice) ? <p aria-live="polite" className="form-error" role="alert">{error ?? shareNotice}</p> : null}
-          <LoginForm onSuccess={handleAuthSuccess} />
-          <p className="login-footer"><a href={drivePublicPath('/login')}>Open the dedicated sign-in page</a></p>
-        </div>
-      </main>
-    );
-  }
-
-  if (authState === 'error') {
-    return (
-      <main className="login-page">
-        <div className="login-card">
-          <a className="brand brand-centered" href={drivePublicPath('/')}><span aria-hidden="true" className="brand-mark">D</span><span>Drive</span></a>
+      <main className="unavailable-page">
+        <div className="unavailable-card">
+          <a className="brand unavailable-brand" href={drivePublicPath('/')}><span aria-hidden="true" className="brand-mark">D</span><span>Drive</span></a>
           <p className="eyebrow">Private storage</p>
           <h1>Drive is unavailable</h1>
-          <p className="login-intro">Drive could not be reached while checking your session.</p>
+          <p className="unavailable-intro">Drive could not be reached. Check your connection and try again.</p>
           {error ? <p aria-live="polite" className="form-error" role="alert">{error}</p> : null}
-          <button className="button button-primary button-full" onClick={() => { setAuthState('checking'); setError(null); void loadItems(); }} type="button">Try again</button>
+          <button className="button button-primary button-full" onClick={() => { setUnavailable(false); setError(null); void loadItems(); }} type="button">Try again</button>
         </div>
       </main>
     );
@@ -531,7 +484,6 @@ export function DriveBrowser() {
         </form>
         <div className="header-actions">
           <button aria-label="Drive suggestions" className="header-action" type="button"><DriveIcon name="sparkle" /></button>
-          <button aria-label="Account" className="header-action avatar" type="button">E</button>
         </div>
       </header>
 
@@ -546,14 +498,12 @@ export function DriveBrowser() {
             <button className={`sidebar-link ${view === 'trash' ? 'sidebar-link-active' : ''}`} onClick={() => selectView('trash')} type="button"><DriveIcon name="trash" />Trash</button>
             <p className="sidebar-nav-section">Workspace</p>
             <button className="sidebar-link" onClick={() => { setStatusMessage('Sharing is available for a future Drive connection.'); setSidebarOpen(false); }} type="button"><DriveIcon name="share" />Shared</button>
-            <a className="sidebar-link sidebar-footer-link" href={drivePublicPath('/login')}><DriveIcon name="settings" />Settings</a>
           </nav>
           <div className="storage-card">
             <p className="storage-label"><DriveIcon name="archive" size={17} />Storage</p>
             <div aria-label="Storage used: 22 percent" className="storage-track"><div className="storage-fill" /></div>
             <p className="storage-copy">Storage usage is managed by the private server.</p>
           </div>
-          <div className="sidebar-footer"><a className="sidebar-footer-link" href={drivePublicPath('/login')}>Session active · Sign in again</a></div>
         </aside>
 
         <main className="drive-content">
@@ -674,7 +624,7 @@ class FileShareUnavailableError extends Error {
 }
 
 async function prepareDriveFile(item: DriveFileItem, href: string) {
-  const response = await fetch(href, { credentials: 'include' });
+  const response = await fetch(href);
   if (!response.ok) throw new Error(`The file could not be downloaded (${response.status}).`);
 
   const blob = await response.blob();
